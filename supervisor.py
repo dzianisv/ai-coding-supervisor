@@ -111,6 +111,15 @@ class PatternMatcher:
                 (r"Successfully completed all", 0.95),
                 (r"All automation (tasks|scenarios) (completed|working)", 0.9),
                 (r"FINAL SUMMARY.*completed", 0.8),
+                (r"(is now|has been) (corrected|resolved|fixed)", 0.85),
+                (r"should now (work|load) properly", 0.85),
+                (r"automation should now work", 0.9),
+                (r"(extension|automation) should now (work|function)", 0.85),
+                (r"comprehensive test cases.*ready to execute", 0.8),
+                (r"ready to (execute|run|test)", 0.75),
+                (r"(all|everything) (is|should be) (working|ready|complete)", 0.8),
+                (r"implementation (is )?complete", 0.8),
+                (r"(task|work|implementation) (is )?(done|finished|complete)", 0.8),
             ],
             'incomplete_realization': [
                 (r"(actually|still) (not|isn't|hasn't) (working|completed|done)", 0.9),
@@ -119,6 +128,18 @@ class PatternMatcher:
                 (r"let me (fix|check|verify) that", 0.8),
                 (r"you're right", 0.7),
                 (r"I (should|need to) (check|verify|test)", 0.8),
+                (r"(further|additional) testing needed", 0.9),
+                (r"needs? (more|further|additional) (testing|verification)", 0.85),
+                (r"(still )?need to (verify|test|check)", 0.8),
+                (r"once .+ (loads?|works?)", 0.7),
+                (r"❌ TASK NOT COMPLETE", 1.0),
+                (r"task is NOT complete", 0.95),
+                (r"have NOT (done|completed)", 0.9),
+                (r"What I Have NOT Done", 0.95),
+                (r"Current Reality.*No working", 0.85),
+                (r"To Actually Complete", 0.9),
+                (r"(honest|true) status", 0.8),
+                (r"haven't actually (verified|tested|completed)", 0.9),
             ]
         }
 
@@ -312,7 +333,9 @@ class AdvancedClaudeCodeSupervisor:
 
         try:
             if self.master_fd is not None:
-                os.write(self.master_fd, f"\n{question}\n".encode())
+                # Send the question as if the user typed it and pressed enter
+                question_input = f"{question}\n"
+                os.write(self.master_fd, question_input.encode())
             else:
                 await self.log('ERROR', "PTY not available for verification question")
                 return False
