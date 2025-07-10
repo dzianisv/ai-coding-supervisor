@@ -438,7 +438,9 @@ class ClaudeCodeSupervisor:
                 self.last_message_time = time.time()
                 
                 if isinstance(message, UserMessage):
-                    print(f"\nUser: {message.content}")
+                    for m in json.loads(message.content):
+                        print(m['content'] + "\n")
+        
                     self.message_history.append(("user", message.content))
                     
                 elif isinstance(message, AssistantMessage):
