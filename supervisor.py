@@ -140,6 +140,13 @@ class PatternMatcher:
                 (r"To Actually Complete", 0.9),
                 (r"(honest|true) status", 0.8),
                 (r"haven't actually (verified|tested|completed)", 0.9),
+                (r"❌ Did not (run|analyze|verify)", 1.0),
+                (r"❌.*No (working|tests|results)", 0.95),
+                (r"What I Did NOT Do:", 1.0),
+                (r"CONTINUING TASK", 0.9),
+                (r"No working binary", 0.9),
+                (r"No test results", 0.9),
+                (r"No proof", 0.9),
             ]
         }
 
@@ -182,7 +189,10 @@ class AdvancedClaudeCodeSupervisor:
                  continue_delay: float = 3.0,
                  stall_timeout: float = 300.0,
                  verify_completion: bool = True,
-                 verification_attempts: int = 3):
+                 verification_attempts: int = 3,
+                 terminal_width: int = 120,
+                 terminal_height: int = 40,
+                 auto_continue_on_start: bool = False):
 
         self.command = command
         self.task_description = task_description
@@ -194,6 +204,9 @@ class AdvancedClaudeCodeSupervisor:
         self.stall_timeout = stall_timeout
         self.verify_completion = verify_completion
         self.verification_attempts = verification_attempts
+        self.terminal_width = terminal_width
+        self.terminal_height = terminal_height
+        self.auto_continue_on_start = auto_continue_on_start
 
         # Core components
         self.process: Optional[asyncio.subprocess.Process] = None
@@ -215,6 +228,8 @@ class AdvancedClaudeCodeSupervisor:
         self.last_continue_time = 0
         self.running = True
         self.in_verification = False
+        self.startup_continue_sent = False
+        self.incompleteness_detected_time = 0
 
         # Threading for stdin handling
         self.stdin_thread = None
@@ -306,6 +321,62 @@ class AdvancedClaudeCodeSupervisor:
         self.stdin_thread = threading.Thread(target=stdin_forwarder, daemon=True)
         self.stdin_thread.start()
 
+    async def send_startup_continue(self):
+        """Send continue command when claude-code is waiting for input after startup"""
+        await self.log('INFO', "Monitoring for startup input prompt to send continue...")
+        
+        # Wait for claude-code to initialize and show output
+        await asyncio.sleep(2.0)
+        
+        # Monitor output for up to 30 seconds to detect if input is needed
+        max_wait_time = 30.0
+        start_time = time.time()
+        
+        while not self.startup_continue_sent and (time.time() - start_time) < max_wait_time:
+            # Check if we have recent output to analyze
+            if len(self.recent_output) > 0:
+                recent_text = ''.join(self.recent_output)
+                
+                # Check if claude-code is waiting for input
+                is_waiting, wait_conf = self.matcher.match(recent_text, 'waiting')
+                
+                # Also check for common prompt indicators
+                prompt_indicators = [
+                    r'>\s*$',  # Command prompt
+                    r'What would you like me to do\?',
+                    r'How can I help you\?',
+                    r'What task would you like me to work on\?',
+                    r'I\'m ready to help',
+                    r'Please let me know',
+                    r'Would you like me to',
+                    r'waiting for.*input',
+                ]
+                
+                has_prompt = any(re.search(pattern, recent_text, re.IGNORECASE | re.MULTILINE) 
+                               for pattern in prompt_indicators)
+                
+                if is_waiting or has_prompt:
+                    try:
+                        if self.master_fd is not None:
+                            os.write(self.master_fd, b"continue\n")
+                            self.startup_continue_sent = True
+                            self.metrics.continues_sent += 1
+                            self.last_continue_time = time.time()
+                            await self.log('INFO', "Startup continue sent - claude-code was waiting for input")
+                            return
+                        else:
+                            await self.log('ERROR', "PTY not available for startup continue")
+                            return
+                    except Exception as e:
+                        await self.log('ERROR', f"Failed to send startup continue: {e}")
+                        return
+            
+            # Wait a bit before checking again
+            await asyncio.sleep(1.0)
+        
+        if not self.startup_continue_sent:
+            await self.log('INFO', "No input prompt detected during startup - continue not sent")
+
     async def handle_completion_claim(self) -> bool:
         """Handle when Claude claims completion. Returns True if actually complete."""
         if not self.verify_completion:
@@ -333,9 +404,17 @@ class AdvancedClaudeCodeSupervisor:
 
         try:
             if self.master_fd is not None:
-                # Send the question as if the user typed it and pressed enter
-                question_input = f"{question}\n"
-                os.write(self.master_fd, question_input.encode())
+                await self.log('INFO', "Sending verification question to claude-code...")
+                
+                # Simple approach: just send the question text directly followed by enter
+                # Replace multi-line with single line for better compatibility
+                clean_question = question.replace('\n', ' ').strip()
+                full_input = clean_question + "\n"
+                
+                # Send all at once
+                os.write(self.master_fd, full_input.encode('utf-8'))
+                
+                await self.log('INFO', f"Verification question sent: '{clean_question[:80]}...'")
             else:
                 await self.log('ERROR', "PTY not available for verification question")
                 return False
@@ -394,9 +473,24 @@ class AdvancedClaudeCodeSupervisor:
         is_error, error_conf = self.matcher.match(text, 'error')
         is_waiting, wait_conf = self.matcher.match(text, 'waiting')
         has_progress, _ = self.matcher.match(text, 'progress')
+        is_incomplete, incomplete_conf = self.matcher.match(text, 'incomplete_realization')
 
-        # If claiming completion, verify it
+        # First check if Claude is being honest about incompleteness
+        if is_incomplete and incomplete_conf > 0.8:
+            await self.log('INFO', f"Claude admits task is incomplete (confidence: {incomplete_conf:.2f})")
+            # Mark when incompleteness was first detected for faster auto-continue
+            if self.incompleteness_detected_time == 0:
+                self.incompleteness_detected_time = time.time()
+                await self.log('INFO', "Incompleteness detected - will trigger fast auto-continue")
+            return TaskState.WAITING  # Continue working
+
+        # If claiming completion, verify it only if not obviously incomplete
         if is_complete and complete_conf > 0.8 and self.progress.state != TaskState.COMPLETED:
+            # Skip verification if Claude has just admitted incompleteness
+            if is_incomplete and incomplete_conf > 0.7:
+                await self.log('INFO', "Skipping verification - Claude already admitted incompleteness")
+                return TaskState.WAITING
+            
             is_verified = await self.handle_completion_claim()
             if is_verified:
                 return TaskState.COMPLETED
@@ -445,7 +539,8 @@ class AdvancedClaudeCodeSupervisor:
             if failed_tests:
                 return True, f"Failed tests: {', '.join(failed_tests[:3])}"
 
-            return True, "Claude-Code is waiting for input"
+            # Always continue when in WAITING state - Claude admitted incompleteness
+            return True, "Claude-Code is waiting for input after admitting incompleteness"
 
         if self.progress.state == TaskState.STALLED:
             return True, "Process appears stalled, attempting to continue"
@@ -585,12 +680,29 @@ class AdvancedClaudeCodeSupervisor:
             print("\n[SUPERVISOR] Forcing continue...", file=sys.stderr)
             try:
                 if self.master_fd is not None:
+                    # Send a Ctrl+C first to ensure clean state, then continue
+                    os.write(self.master_fd, b"\x03")
+                    await asyncio.sleep(0.1)
                     os.write(self.master_fd, b"continue\n")
                     self.metrics.continues_sent += 1
+                    await self.log('DEBUG', "Sent manual continue with state reset")
                 else:
                     await self.log('ERROR', "PTY not available for continue command")
             except Exception as e:
                 await self.log('ERROR', f"Failed to send continue: {e}")
+
+        elif cmd.startswith('/send '):
+            # Debug command to send arbitrary text
+            text = cmd[6:]  # Remove '/send '
+            print(f"\n[SUPERVISOR] Sending text: {text}", file=sys.stderr)
+            try:
+                if self.master_fd is not None:
+                    os.write(self.master_fd, (text + "\n").encode('utf-8'))
+                    await self.log('DEBUG', f"Sent text: {text}")
+                else:
+                    await self.log('ERROR', "PTY not available for send command")
+            except Exception as e:
+                await self.log('ERROR', f"Failed to send text: {e}")
 
         else:
             print(f"\n[SUPERVISOR] Unknown command: {cmd}", file=sys.stderr)
@@ -602,21 +714,38 @@ class AdvancedClaudeCodeSupervisor:
                 await asyncio.sleep(1)
 
                 # Check if we should auto-continue
-                if (self.auto_continue and
-                    time.time() - self.last_output_time > self.continue_delay and
-                    time.time() - self.last_continue_time > self.continue_delay):
-
+                current_time = time.time()
+                
+                # Fast auto-continue if incompleteness was detected
+                fast_continue = (self.incompleteness_detected_time > 0 and 
+                               current_time - self.incompleteness_detected_time > 2.0 and
+                               current_time - self.last_continue_time > self.continue_delay)
+                
+                # Normal auto-continue timing
+                normal_continue = (current_time - self.last_output_time > self.continue_delay and
+                                 current_time - self.last_continue_time > self.continue_delay)
+                
+                if self.auto_continue and (fast_continue or normal_continue):
                     should_cont, reason = await self.should_continue()
 
                     if should_cont:
                         self.metrics.continues_sent += 1
                         self.last_continue_time = time.time()
-
-                        await self.log('INFO', f"Auto-continue #{self.metrics.continues_sent}: {reason}")
+                        
+                        # Reset incompleteness detection timer after successful continue
+                        if self.incompleteness_detected_time > 0:
+                            await self.log('INFO', f"Fast auto-continue #{self.metrics.continues_sent}: {reason}")
+                            self.incompleteness_detected_time = 0  # Reset for next time
+                        else:
+                            await self.log('INFO', f"Auto-continue #{self.metrics.continues_sent}: {reason}")
 
                         try:
                             if self.master_fd is not None:
+                                # Send a Ctrl+C first to ensure clean state, then continue
+                                os.write(self.master_fd, b"\x03")
+                                await asyncio.sleep(0.1)
                                 os.write(self.master_fd, b"continue\n")
+                                await self.log('DEBUG', "Sent auto-continue with state reset")
                             else:
                                 await self.log('ERROR', "PTY not available for auto-continue")
                         except Exception as e:
@@ -686,13 +815,59 @@ class AdvancedClaudeCodeSupervisor:
         # Create PTY for proper terminal interaction
         self.master_fd, self.slave_fd = pty.openpty()
         
-        # Set terminal size to match current terminal
+        # Auto-detect and use current terminal size
         try:
-            rows, cols = os.get_terminal_size()
+            # Try multiple methods to get terminal size
+            rows, cols = None, None
+            
+            # Method 1: Direct os.get_terminal_size()
+            try:
+                rows, cols = os.get_terminal_size()
+            except:
+                pass
+            
+            # Method 2: Try with stdout if direct method fails
+            if not cols:
+                try:
+                    rows, cols = os.get_terminal_size(sys.stdout.fileno())
+                except:
+                    pass
+            
+            # Method 3: Try with stderr
+            if not cols:
+                try:
+                    rows, cols = os.get_terminal_size(sys.stderr.fileno())
+                except:
+                    pass
+            
+            # Method 4: Environment variables
+            if not cols:
+                try:
+                    cols = int(os.environ.get('COLUMNS', 0))
+                    rows = int(os.environ.get('LINES', 0))
+                    if cols == 0 or rows == 0:
+                        cols, rows = None, None
+                except:
+                    cols, rows = None, None
+            
+            if cols and rows:
+                await self.log('INFO', f"Auto-detected terminal size: {cols}x{rows}")
+            else:
+                # Fallback to specified size if detection fails
+                rows, cols = self.terminal_height, self.terminal_width
+                await self.log('WARNING', f"Could not detect terminal size, using fallback: {cols}x{rows}")
+                
+        except Exception as e:
+            # Fallback to specified size if detection fails
+            rows, cols = self.terminal_height, self.terminal_width
+            await self.log('WARNING', f"Terminal size detection error: {e}, using fallback: {cols}x{rows}")
+        
+        try:
             winsize = struct.pack('HHHH', rows, cols, 0, 0)
             fcntl.ioctl(self.slave_fd, termios.TIOCSWINSZ, winsize)
-        except Exception:
-            pass  # Fallback to default size
+            await self.log('INFO', f"Set PTY terminal size to {cols}x{rows}")
+        except Exception as e:
+            await self.log('WARNING', f"Failed to set terminal size: {e}")
 
         # Start subprocess with PTY
         self.process = await asyncio.create_subprocess_exec(
@@ -713,6 +888,10 @@ class AdvancedClaudeCodeSupervisor:
             asyncio.create_task(self.handle_pty_output(), name='pty_handler'),
             asyncio.create_task(self.auto_continue_monitor(), name='monitor'),
         ]
+
+        # Add startup continue task if requested
+        if self.auto_continue_on_start:
+            tasks.append(asyncio.create_task(self.send_startup_continue(), name='startup_continue'))
 
         try:
             # Wait for process completion
@@ -783,6 +962,12 @@ async def main():
     parser.add_argument('-l', '--log-file', help='Custom log file path')
     parser.add_argument('--verify-attempts', type=int, default=3,
                         help='Number of verification attempts (default: 3)')
+    parser.add_argument('--terminal-width', type=int, default=120,
+                        help='Terminal width for PTY (default: 120)')
+    parser.add_argument('--terminal-height', type=int, default=40,
+                        help='Terminal height for PTY (default: 40)')
+    parser.add_argument('--continue-on-start', action='store_true',
+                        help='Send "continue" command immediately on startup to resume previous task')
 
     args = parser.parse_args()
 
@@ -796,7 +981,10 @@ async def main():
         continue_delay=args.delay,
         stall_timeout=args.stall_timeout,
         verify_completion=not args.no_verify,
-        verification_attempts=args.verify_attempts
+        verification_attempts=args.verify_attempts,
+        terminal_width=args.terminal_width,
+        terminal_height=args.terminal_height,
+        auto_continue_on_start=args.continue_on_start
     )
 
     # Handle Ctrl+C gracefully
@@ -808,8 +996,22 @@ async def main():
         for task in asyncio.all_tasks(loop):
             task.cancel()
 
+    def resize_handler():
+        # Handle terminal resize - auto-detect and apply new size
+        try:
+            if supervisor.slave_fd is not None:
+                rows, cols = os.get_terminal_size()
+                winsize = struct.pack('HHHH', rows, cols, 0, 0)
+                fcntl.ioctl(supervisor.slave_fd, termios.TIOCSWINSZ, winsize)
+                print(f"\n[SUPERVISOR] Terminal auto-resized to {cols}x{rows}", file=sys.stderr)
+        except Exception as e:
+            print(f"\n[SUPERVISOR] Resize error: {e}", file=sys.stderr)
+
     for sig in [signal.SIGINT, signal.SIGTERM]:
         loop.add_signal_handler(sig, signal_handler)
+    
+    # Handle terminal resize
+    loop.add_signal_handler(signal.SIGWINCH, resize_handler)
 
     try:
         await supervisor.run()
