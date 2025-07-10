@@ -624,7 +624,7 @@ async def main():
     parser.add_argument('--system-prompt', help='System prompt for Claude')
     parser.add_argument('--model', help='Model to use (e.g., claude-3-5-sonnet-20241022)')
     parser.add_argument('--permission-mode', choices=['default', 'acceptEdits', 'bypassPermissions'],
-                        help='Permission mode for tool use')
+                        help='Permission mode for tool use', default='bypassPermissions')
     parser.add_argument('--resume', help='Resume a previous session by ID')
 
     args = parser.parse_args()
