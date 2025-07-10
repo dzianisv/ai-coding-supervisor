@@ -709,6 +709,8 @@ class AdvancedClaudeCodeSupervisor:
 
     async def auto_continue_monitor(self):
         """Monitor and auto-continue when appropriate"""
+        await self.log('INFO', "Auto-continue monitor started")
+        
         while self.process and self.process.returncode is None:
             try:
                 await asyncio.sleep(1)
@@ -724,6 +726,11 @@ class AdvancedClaudeCodeSupervisor:
                 # Normal auto-continue timing
                 normal_continue = (current_time - self.last_output_time > self.continue_delay and
                                  current_time - self.last_continue_time > self.continue_delay)
+                
+                # Debug logging every 10 seconds
+                if int(current_time) % 10 == 0 and not hasattr(self, '_last_debug_time') or current_time - getattr(self, '_last_debug_time', 0) > 10:
+                    self._last_debug_time = current_time
+                    await self.log('DEBUG', f"Monitor check - State: {self.progress.state.value}, Fast: {fast_continue}, Normal: {normal_continue}, Incompleteness: {self.incompleteness_detected_time}")
                 
                 if self.auto_continue and (fast_continue or normal_continue):
                     should_cont, reason = await self.should_continue()
@@ -806,6 +813,7 @@ class AdvancedClaudeCodeSupervisor:
         print(f"[SUPERVISOR] Auto-continue: {'ON' if self.auto_continue else 'OFF'}", file=sys.stderr)
         print(f"[SUPERVISOR] Completion verification: {'ON' if self.verify_completion else 'OFF'}", file=sys.stderr)
         print(f"[SUPERVISOR] Max continues: {self.max_continues}", file=sys.stderr)
+        print(f"[SUPERVISOR] Continue delay: {self.continue_delay}s", file=sys.stderr)
         print(f"[SUPERVISOR] Log file: {self.log_file}", file=sys.stderr)
         print("-" * 80, file=sys.stderr)
 
