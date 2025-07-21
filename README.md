@@ -1,103 +1,77 @@
-# Multi-Agent Coding Tool
+# AI Coding Supervisor
 
-A CLI-based agentic coding tool that operates as a team of AI agents, with an Engineering Manager coordinating coding agents to complete complex development tasks.
+A CLI-based multi-agent coding tool that uses AI to automate software development tasks through collaborative AI agents.
 
-## Overview
+## 🚀 Features
 
-This tool simulates a real development team where:
-- **Engineering Manager** (LiteLLM-based) acts as the main orchestrator
-- **Coding Agents** (Claude-code wrapped) execute specific coding tasks
-- Tasks are automatically decomposed, delegated, reviewed, and refined
+- **AI-Powered Team**: Engineering Manager orchestrates specialized coding agents
+- **Task Automation**: From simple scripts to full applications
+- **Real-Time Collaboration**: Interactive CLI with progress tracking
+- **Smart Testing**: Comprehensive test suite with real LLM integration
+- **Extensible**: Plugin architecture for adding new agents and tools
 
-## Features
+## ⚡ Quick Start
 
-- 🎯 **Task Decomposition**: Automatically breaks down complex tasks into manageable subtasks
-- 🤖 **Multi-Agent Coordination**: Engineering Manager delegates work to specialized coding agents
-- 🔄 **Review & Feedback**: Automated code review and revision cycles
-- 📊 **Progress Tracking**: Real-time progress monitoring with Rich UI
-- 🛠️ **CLI Interface**: Interactive and batch execution modes
-- ⚙️ **Configurable**: Flexible configuration for models, agents, and behavior
+1. **Install dependencies**:
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-## Installation
+2. **Set API keys** (optional, needed for cloud models):
+   ```bash
+   export ANTHROPIC_API_KEY="your-anthropic-key"
+   export OPENAI_API_KEY="your-openai-key"
+   ```
 
+3. **Run the CLI**:
+   ```bash
+   python -m cli.main_cli
+   ```
 
-Install dependencies:
-```bash
-pip install -r requirements.txt
-```
-
-Set up environment variables (optional):
-```bash
-export ANTHROPIC_API_KEY="your-anthropic-key"
-export OPENAI_API_KEY="your-openai-key"  # for LiteLLM
-```
-
-## Quick Start
+## 🛠 Usage
 
 ### Interactive Mode
-Start the interactive team interface:
 ```bash
-python team_coding_tool.py start
+python -m cli.main_cli start
 ```
 
-This launches an interactive session where you can:
-- Execute tasks with `task <description>`
-- Monitor team status with `status`
-- View agent information with `agents`
-- Check task history with `history`
-
-### Single Task Execution
-Execute a single task and exit:
+### Execute a Single Task
 ```bash
-python team_coding_tool.py execute "Create a REST API for user management with authentication"
+python -m cli.main_cli execute "Create a REST API with FastAPI and SQLAlchemy"
 ```
 
-### Configuration
-Configure team settings:
+## 🧪 Testing
+
+Run all tests:
 ```bash
-python team_coding_tool.py configure
+pytest tests/
 ```
 
-## Usage Examples
-
-### Example 1: Web Application Development
+Run specific test categories:
 ```bash
-python team_coding_tool.py execute "Build a Flask web application with user registration, login, and a dashboard. Include proper error handling and basic styling."
+# Unit tests
+pytest tests/unit
+
+# Integration tests (requires API keys)
+pytest tests/integration
+
+# Performance tests
+pytest tests/performance
 ```
 
-### Example 2: Data Processing Pipeline
-```bash
-python team_coding_tool.py execute "Create a Python script that reads CSV data, performs data cleaning, generates visualizations, and exports results to multiple formats."
-```
+## 🏗 Architecture
 
-### Example 3: API Integration
-```bash
-python team_coding_tool.py execute "Develop a Python client library for the GitHub API with methods for repository management, issue tracking, and pull request operations."
-```
+### Core Components
+- **Engineering Manager**: Orchestrates tasks using LiteLLM
+- **Claude Code Agent**: Executes coding tasks with Claude
+- **CLI Interface**: Rich terminal interface for interaction
+- **Test Suite**: Comprehensive tests with real LLM integration
 
-### Testing
-```
-pytest -sv tests
-```
+## 📚 Documentation
 
-## Architecture
-
-### Components
-
-1. **Engineering Manager** (`agents/engineering_manager.py`)
-   - Uses LiteLLM for task decomposition and work review
-   - Manages agent assignments and coordination
-   - Handles feedback loops and revision requests
-
-2. **Base Agent** (`agents/base_agent.py`)
-   - Abstract base class for all agents
-   - Defines communication protocols and interfaces
-   - Manages agent status and capabilities
-
-3. **Claude Code Agent** (`agents/claude_code_agent.py`)
-   - Wraps claude-code-sdk functionality
-   - Executes coding tasks and provides results
-   - Handles code generation, review, and debugging
+- [Testing Guide](TESTING.md): How to run and write tests
+- [API Reference](docs/API.md): Detailed API documentation
+- [Development Guide](docs/DEVELOPMENT.md): Contributing to the project
 
 4. **Agent Registry** (`agents/agent_registry.py`)
    - Manages agent registration and discovery
