@@ -1,5 +1,7 @@
 # AI Vibe Team
 
+![](./doc/ai-agent.gif)
+
 While building Vibe Browser, I prototyped a self-organizing development team composed entirely of AI agents. Here’s how it works:
 
 Coding Agents (e.g. Claude Code, Codex, Gemini CLI) generate and test code around the clock.
