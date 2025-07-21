@@ -1,4 +1,17 @@
-# AI Coding Supervisor
+# AI Vibe Team
+
+While building Vibe Browser, I prototyped a self-organizing development team composed entirely of AI agents. Here’s how it works:
+
+Coding Agents (e.g. Claude Code, Codex, Gemini CLI) generate and test code around the clock.
+
+Analysis Agents ingest logs, UI screenshots, and test results, then flag broken or suboptimal areas.
+
+AI Engineering Manager (powered by a premium LLM like o3, Gemini 2.5-Pro, or Claude 4-Opus) reflects on the coding agents’ output, prioritizes fixes and features, and issues new tasks—ensuring we never ship “it compiles” as “it’s done.”
+
+Iteration Loop continues autonomously, with the manager refining requirements and the coding agents executing them until the feature is production-ready.
+
+This architecture lets us spin up a full “dev team” in minutes, with the quality-control layer of a senior engineering manager baked in. It’s already speeding up Vibe Browser’s feature cycle—and could redefine how small teams (or even solo founders) scale every aspect of software development.
+
 
 A CLI-based multi-agent coding tool that uses AI to automate software development tasks through collaborative AI agents.
 
