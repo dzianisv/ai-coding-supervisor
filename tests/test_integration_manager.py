@@ -3,24 +3,34 @@ Integration tests for Engineering Manager with real LLM queries
 """
 
 import asyncio
-import pytest
+import json
 import os
+import pytest
+import pytest_asyncio
 import sys
+import tempfile
 from pathlib import Path
+from typing import Dict, Any, List, Optional, Tuple
+
+from rich.console import Console
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from agents import EngineeringManager, AgentRegistry
+# Agent imports
+from agents.engineering_manager import EngineeringManager
+from agents.agent_registry import AgentRegistry
 from agents.claude_code_agent import ClaudeCodeAgent
 from agents.base_agent import AgentStatus
+
+# Test utilities
 from tests.test_utils import (
-    skip_if_no_litellm_key, 
-    TempWorkspace, 
+    TempWorkspace,
+    TestTaskBuilder,
     create_test_files,
     validate_task_result,
     get_test_models,
-    TestTaskBuilder
+    skip_if_no_litellm_key,
 )
 
 
@@ -29,7 +39,7 @@ from tests.test_utils import (
 class TestEngineeringManagerIntegration:
     """Integration tests for Engineering Manager using real LLM queries"""
     
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def manager_with_agents(self):
         """Create manager with coding agents"""
         skip_if_no_litellm_key()
@@ -37,10 +47,10 @@ class TestEngineeringManagerIntegration:
         models = get_test_models()
         registry = AgentRegistry()
         
-        # Create Engineering Manager
+        # Create Engineering Manager with test model
         manager = EngineeringManager(
             agent_id="test_manager",
-            model=models.get("manager", "gpt-3.5-turbo")
+            production=False  # Ensures test model is used
         )
         registry.register_agent(manager)
         
@@ -60,8 +70,46 @@ class TestEngineeringManagerIntegration:
         await registry.shutdown_all_agents()
     
     @pytest.mark.asyncio
+    async def test_os_import_in_context(self):
+        """Test that os module can be imported in the test class context"""
+        import os
+        import sys
+        
+        # Check if os module is in sys.modules
+        assert 'os' in sys.modules, "os module not found in sys.modules"
+        
+        # Check if we can use os functions
+        assert os.getenv('PATH') is not None, "os.getenv returned None"
+        
+        # Check if we can access environment variables
+        assert 'PATH' in os.environ, "PATH not found in os.environ"
+        
+        print("os module is working correctly in test context")
+    
+    @pytest.mark.asyncio
     async def test_task_decomposition_real_llm(self, manager_with_agents):
         """Test task decomposition with real LLM"""
+        print("\n=== Starting test_task_decomposition_real_llm ===")
+        
+        # Debug: Check if os is already in sys.modules
+        import sys
+        print(f"sys.modules has 'os': {'os' in sys.modules}")
+        
+        # Try different ways to import os
+        try:
+            import os
+            print("Direct import of os succeeded")
+        except ImportError as e:
+            print(f"Direct import of os failed: {e}")
+        
+        try:
+            import importlib
+            os = importlib.import_module('os')
+            print("importlib.import_module('os') succeeded")
+        except ImportError as e:
+            print(f"importlib.import_module('os') failed: {e}")
+        
+        # Get the manager and other fixtures
         manager, registry, workspace = manager_with_agents
         
         # Create test files
@@ -81,6 +129,10 @@ class TestEngineeringManagerIntegration:
             if agent.agent_id != manager.agent_id
         ]
         
+        # Verify the real model is being used
+        expected_model = os.getenv("TEST_MODEL", "gpt-4.1-nano")
+        assert manager.model == expected_model, f"Expected model {expected_model}, but got {manager.model}"
+        
         # Test decomposition
         subtasks = await manager.task_decomposer.decompose_task(
             task["description"], 
@@ -90,6 +142,9 @@ class TestEngineeringManagerIntegration:
         # Validate decomposition
         assert isinstance(subtasks, list)
         assert len(subtasks) > 0
+        
+        # Verify model was actually used (check that we got real LLM response)
+        assert all("subtask_id" in subtask for subtask in subtasks), "Real LLM should generate proper subtask structure"
         
         # Check subtask structure
         for subtask in subtasks:
@@ -102,6 +157,9 @@ class TestEngineeringManagerIntegration:
     @pytest.mark.asyncio
     async def test_work_review_real_llm(self, manager_with_agents):
         """Test work review with real LLM"""
+        # Use importlib to ensure the os module is properly imported
+        import importlib
+        os = importlib.import_module('os')
         manager, registry, workspace = manager_with_agents
         
         # Create a mock task result
@@ -128,6 +186,11 @@ class TestEngineeringManagerIntegration:
             execution_time=45.2
         )
         
+        # Verify the real model is being used
+        expected_model = os.getenv("TEST_MODEL", "gpt-4.1-nano")
+        assert manager.model == expected_model, f"Expected model {expected_model}, but got {manager.model}"
+        assert manager.work_reviewer.model == expected_model, f"Work reviewer should use {expected_model}, but got {manager.work_reviewer.model}"
+        
         # Test work review
         review = await manager.work_reviewer.review_work(subtask, mock_result)
         
@@ -147,6 +210,9 @@ class TestEngineeringManagerIntegration:
     @pytest.mark.asyncio
     async def test_simple_task_execution_real_llm(self, manager_with_agents):
         """Test simple task execution end-to-end with real LLM"""
+        # Use importlib to ensure the os module is properly imported
+        import importlib
+        os = importlib.import_module('os')
         manager, registry, workspace = manager_with_agents
         
         # Create test files
@@ -176,6 +242,9 @@ class TestEngineeringManagerIntegration:
     @pytest.mark.asyncio
     async def test_team_status_and_coordination(self, manager_with_agents):
         """Test team status and coordination functionality"""
+        # Use importlib to ensure the os module is properly imported
+        import importlib
+        os = importlib.import_module('os')
         manager, registry, workspace = manager_with_agents
         
         # Check initial team status
@@ -203,7 +272,7 @@ class TestEngineeringManagerIntegration:
 class TestClaudeCodeAgentIntegration:
     """Integration tests for Claude Code Agent with real queries"""
     
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def claude_agent(self):
         """Create Claude coding agent"""
         skip_if_no_litellm_key()
@@ -303,7 +372,7 @@ def divide(a, b):
 class TestEndToEndWorkflow:
     """End-to-end workflow integration tests"""
     
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def full_team_setup(self):
         """Set up complete team for end-to-end testing"""
         skip_if_no_litellm_key()

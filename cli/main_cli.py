@@ -102,6 +102,10 @@ async def _run_team_interface(working_dir: str, model: str, claude_model: str, n
             await registry.shutdown_all_agents()
 
 
+def _execute_task_sync(task_description, working_dir, model, agents):
+    """Synchronous wrapper for task execution"""
+    return asyncio.run(_execute_single_task(task_description, working_dir, model, agents))
+
 @main_cli.command()
 @click.argument('task_description')
 @click.option('--working-dir', '-w', default=None, help='Working directory for the project')
@@ -110,19 +114,23 @@ async def _run_team_interface(working_dir: str, model: str, claude_model: str, n
 @click.option('--output', '-o', help='Output file for results')
 def execute(task_description, working_dir, model, agents, output):
     """Execute a single task and exit"""
-    
+    import sys
     console = Console()
     
     # Set working directory
     if working_dir:
         working_dir = os.path.abspath(working_dir)
+        # Check if working directory exists
+        if not os.path.exists(working_dir):
+            console.print(f"[red]Error: Working directory does not exist: {working_dir}[/red]")
+            sys.exit(1)
     else:
         working_dir = os.getcwd()
     
     console.print(f"[blue]🎯 Executing task: {task_description}[/blue]")
     
-    # Run the task execution
-    result = asyncio.run(_execute_single_task(task_description, working_dir, model, agents))
+    # Always use the synchronous wrapper for CLI execution
+    result = _execute_task_sync(task_description, working_dir, model, agents)
     
     if output:
         # Save results to file
@@ -179,31 +187,47 @@ def status():
 
 @main_cli.command()
 @click.option('--config-file', default='team_config.json', help='Configuration file path')
-def configure(config_file):
+@click.option('--non-interactive', is_flag=True, help='Use default values without prompting')
+@click.option('--default-model', help='Engineering Manager model (non-interactive mode)')
+@click.option('--claude-model', help='Claude coding agent model (non-interactive mode)')
+@click.option('--default-agents', type=int, help='Default number of coding agents (non-interactive mode)')
+@click.option('--working-dir', help='Default working directory (non-interactive mode)')
+def configure(config_file, non_interactive, default_model, claude_model, default_agents, working_dir):
     """Configure the multi-agent team settings"""
     
     console = Console()
-    
-    # Interactive configuration
     config = {}
     
-    console.print(Panel.fit("🔧 Team Configuration", title="Setup"))
-    
-    config['default_model'] = Prompt.ask("Engineering Manager model", default="gpt-4")
-    config['claude_model'] = Prompt.ask("Claude coding agent model", default="claude-3-sonnet-20240229")
-    config['default_agents'] = int(Prompt.ask("Default number of coding agents", default="2"))
-    config['working_directory'] = Prompt.ask("Default working directory", default=os.getcwd())
-    
-    # Advanced settings
-    if Prompt.ask("Configure advanced settings?", choices=["y", "n"], default="n") == "y":
-        config['max_task_time'] = int(Prompt.ask("Max task execution time (seconds)", default="3600"))
-        config['retry_attempts'] = int(Prompt.ask("Max retry attempts", default="3"))
-        config['log_level'] = Prompt.ask("Log level", choices=["DEBUG", "INFO", "WARNING", "ERROR"], default="INFO")
+    if non_interactive:
+        # Use provided values or defaults without prompting
+        config['default_model'] = default_model or "gpt-4"
+        config['claude_model'] = claude_model or "claude-3-sonnet-20240229"
+        config['default_agents'] = default_agents or 2
+        config['working_directory'] = working_dir or os.getcwd()
+        config['max_task_time'] = 3600
+        config['retry_attempts'] = 3
+        config['log_level'] = "INFO"
+    else:
+        # Interactive configuration
+        console.print(Panel.fit("🔧 Team Configuration", title="Setup"))
+        
+        config['default_model'] = Prompt.ask("Engineering Manager model", default="gpt-4")
+        config['claude_model'] = Prompt.ask("Claude coding agent model", default="claude-3-sonnet-20240229")
+        config['default_agents'] = int(Prompt.ask("Default number of coding agents", default="2"))
+        config['working_directory'] = Prompt.ask("Default working directory", default=os.getcwd())
+        
+        # Advanced settings
+        if Prompt.ask("Configure advanced settings?", choices=["y", "n"], default="n") == "y":
+            config['max_task_time'] = int(Prompt.ask("Max task execution time (seconds)", default="3600"))
+            config['retry_attempts'] = int(Prompt.ask("Max retry attempts", default="3"))
+            config['log_level'] = Prompt.ask("Log level", choices=["DEBUG", "INFO", "WARNING", "ERROR"], default="INFO")
     
     # Save configuration
     import json
     with open(config_file, 'w') as f:
         json.dump(config, f, indent=2)
+    
+    console.print(f"✅ Configuration saved to {config_file}", style="green")
     
     console.print(f"[green]✅ Configuration saved to {config_file}[/green]")
 

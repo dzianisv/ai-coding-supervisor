@@ -4,6 +4,7 @@ Performance and stress integration tests with real LLM queries
 
 import asyncio
 import pytest
+import pytest_asyncio
 import time
 import sys
 from pathlib import Path
@@ -30,7 +31,7 @@ from tests.test_utils import (
 class TestPerformanceIntegration:
     """Performance tests with real LLM queries"""
     
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def performance_team(self):
         """Set up team for performance testing"""
         skip_if_no_litellm_key()
@@ -189,7 +190,7 @@ class TestPerformanceIntegration:
 class TestRobustnessIntegration:
     """Robustness tests with real LLM queries"""
     
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def robust_team(self):
         """Set up team for robustness testing"""
         skip_if_no_litellm_key()
@@ -297,7 +298,7 @@ class TestRobustnessIntegration:
 class TestRealWorldScenarios:
     """Real-world scenario integration tests"""
     
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def scenario_team(self):
         """Set up team for real-world scenario testing"""
         skip_if_no_litellm_key()

@@ -20,18 +20,13 @@ This tool simulates a real development team where:
 
 ## Installation
 
-1. Clone the repository:
-```bash
-git clone <repository-url>
-cd ai-coding-supervisor
-```
 
-2. Install dependencies:
+Install dependencies:
 ```bash
 pip install -r requirements.txt
 ```
 
-3. Set up environment variables (optional):
+Set up environment variables (optional):
 ```bash
 export ANTHROPIC_API_KEY="your-anthropic-key"
 export OPENAI_API_KEY="your-openai-key"  # for LiteLLM
@@ -78,6 +73,11 @@ python team_coding_tool.py execute "Create a Python script that reads CSV data, 
 ### Example 3: API Integration
 ```bash
 python team_coding_tool.py execute "Develop a Python client library for the GitHub API with methods for repository management, issue tracking, and pull request operations."
+```
+
+### Testing
+```
+pytest -sv tests
 ```
 
 ## Architecture

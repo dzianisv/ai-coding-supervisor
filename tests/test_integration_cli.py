@@ -41,12 +41,14 @@ class TestCLIIntegration:
         
         models = get_test_models()
         config = {
-            "default_model": models.get("manager", "gpt-3.5-turbo"),
+            "test_model": models.get("manager", "gpt-4.1-nano"),
+            "prod_model": models.get("prod_manager", "gpt-4o-2024-05-13"),
             "claude_model": models.get("claude"),
             "default_agents": 1,
             "max_task_time": 300,  # 5 minutes for testing
             "retry_attempts": 2,
-            "log_level": "INFO"
+            "log_level": "INFO",
+            "production_mode": False  # Test mode by default
         }
         
         with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
@@ -80,19 +82,47 @@ class TestCLIIntegration:
         result = cli_runner.invoke(main_cli, ['configure', '--help'])
         assert result.exit_code == 0
         
-        # Test configure with config file
+        # Test configure with non-interactive mode
         result = cli_runner.invoke(main_cli, [
-            'configure', 
-            '--config-file', temp_config
-        ], input='gpt-3.5-turbo\nclaud-3-haiku\n2\nn\n')
+            'configure',
+            '--config-file', temp_config,
+            '--non-interactive',
+            '--default-model', 'gpt-3.5-turbo',
+            '--claude-model', 'claude-3-haiku-20240307',
+            '--default-agents', '2',
+            '--working-dir', os.getcwd()
+        ])
         
         # Should complete without error
         assert result.exit_code == 0
+        
+        # Verify the config file was created with expected content
+        import json
+        with open(temp_config, 'r') as f:
+            config = json.load(f)
+            assert config['default_model'] == 'gpt-3.5-turbo'
+            assert config['claude_model'] == 'claude-3-haiku-20240307'
+            assert config['default_agents'] == 2
     
-    @pytest.mark.asyncio
-    async def test_cli_execute_simple_task(self, cli_runner, temp_config):
+    def test_cli_execute_simple_task(self, cli_runner, temp_config, monkeypatch):
         """Test CLI execute command with simple task"""
         skip_if_no_litellm_key()
+        
+        # Mock the asyncio.run call to avoid event loop issues in tests
+        original_run = asyncio.run
+        
+        def mock_asyncio_run(coro):
+            # Create a new event loop for the test
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                return loop.run_until_complete(coro)
+            finally:
+                loop.close()
+                asyncio.set_event_loop(None)
+        
+        # Apply the mock
+        monkeypatch.setattr(asyncio, 'run', mock_asyncio_run)
         
         with TempWorkspace() as workspace:
             create_test_files(workspace)
@@ -100,30 +130,36 @@ class TestCLIIntegration:
             # Create output file for results
             output_file = workspace / "results.json"
             
-            # Execute simple task via CLI
-            result = cli_runner.invoke(main_cli, [
-                'execute',
-                'Create a simple Python function that returns the square of a number',
-                '--working-dir', str(workspace),
-                '--agents', '1',
-                '--output', str(output_file)
-            ])
-            
-            # Check command completed
-            assert result.exit_code == 0
-            
-            # Check output file was created
-            assert output_file.exists()
-            
-            # Validate output structure
-            with open(output_file, 'r') as f:
-                output_data = json.load(f)
-            
-            assert "task_id" in output_data
-            assert "status" in output_data
-            assert "execution_time" in output_data
+            try:
+                # Execute simple task via CLI
+                result = cli_runner.invoke(main_cli, [
+                    'execute',
+                    'Create a simple Python function that returns the square of a number',
+                    '--working-dir', str(workspace),
+                    '--agents', '1',
+                    '--output', str(output_file)
+                ])
+                
+                # Check command completed
+                assert result.exit_code == 0, f"Command failed with error: {result.output}"
+                
+                # Check output file was created
+                assert output_file.exists(), f"Output file {output_file} was not created"
+                
+                # Check output file has valid JSON
+                import json
+                with open(output_file, 'r') as f:
+                    result_data = json.load(f)
+                    
+                # Check result structure
+                assert 'status' in result_data, "Result data is missing 'status' field"
+                assert 'result' in result_data, "Result data is missing 'result' field"
+                assert 'artifacts' in result_data, "Result data is missing 'artifacts' field"
+                
+            finally:
+                # Clean up - restore original asyncio.run
+                monkeypatch.setattr(asyncio, 'run', original_run)
     
-    @pytest.mark.slow
     def test_cli_execute_with_different_models(self, cli_runner):
         """Test CLI execute with different model configurations"""
         skip_if_no_litellm_key()

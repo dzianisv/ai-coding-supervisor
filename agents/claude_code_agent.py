@@ -186,25 +186,75 @@ Working directory: {self.working_directory}
             if self.permission_mode:
                 options.permission_mode = self.permission_mode
             
-            # Execute query
-            messages = [UserMessage(content=prompt)]
+            print(f"Executing Claude query with options: {options}")
+            print(f"Working directory: {self.working_directory}")
             
-            result = await query(
-                messages=messages,
-                options=options,
-                session_id=self.session_id
-            )
-            
-            self.total_queries += 1
-            
-            # Store session ID for continuation
-            if hasattr(result, 'session_id'):
-                self.session_id = result.session_id
-            
-            return result
-            
+            try:
+                # Execute query with the prompt directly
+                # The query function returns an async generator, so we need to collect the results
+                result_generator = query(
+                    prompt=prompt,
+                    options=options
+                )
+                
+                # Collect all results from the async generator
+                results = []
+                try:
+                    async for message in result_generator:
+                        # Log the raw message for debugging
+                        print(f"Raw Claude message: {message}")
+                        print(f"Message type: {type(message).__name__}")
+                        print(f"Message attributes: {[attr for attr in dir(message) if not attr.startswith('_')]}")
+                        
+                        if hasattr(message, 'content'):
+                            print(f"Message content type: {type(message.content).__name__}")
+                            if isinstance(message.content, (list, tuple)):
+                                for i, block in enumerate(message.content):
+                                    print(f"  Block {i} type: {type(block).__name__}")
+                                    print(f"  Block {i} attributes: {[attr for attr in dir(block) if not attr.startswith('_')]}")
+                        
+                        results.append(message)
+                        # Store session ID if available in the message
+                        if hasattr(message, 'session_id'):
+                            self.session_id = message.session_id
+                    
+                    self.total_queries += 1
+                    
+                    # Return the last message or None if no results
+                    return results[-1] if results else None
+                    
+                except Exception as e:
+                    print(f"Error iterating over Claude response: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    return None
+                    
+            except Exception as e:
+                # Try to get more detailed error information
+                import subprocess
+                try:
+                    # Try running a simple Claude command to check if the CLI works
+                    result = subprocess.run(
+                        ["claude", "--version"],
+                        capture_output=True,
+                        text=True,
+                        cwd=self.working_directory or "."
+                    )
+                    print(f"Claude CLI version check output: {result.stdout}")
+                    print(f"Claude CLI version check error: {result.stderr}")
+                except Exception as cli_error:
+                    print(f"Error running Claude CLI: {cli_error}")
+                
+                print(f"Claude query failed with error: {e}")
+                print(f"Error type: {type(e).__name__}")
+                import traceback
+                traceback.print_exc()
+                return None
+                
         except Exception as e:
-            print(f"Claude query failed: {e}")
+            print(f"Unexpected error in _execute_claude_query: {e}")
+            import traceback
+            traceback.print_exc()
             return None
     
     async def _process_claude_response(self, result: Any) -> Dict[str, Any]:
@@ -216,35 +266,67 @@ Working directory: {self.working_directory}
             "tool_uses": [],
             "files_modified": [],
             "tests_run": [],
-            "summary": ""
+            "summary": "",
+            "debug_info": {}
         }
         
         try:
-            if hasattr(result, 'messages'):
-                for message in result.messages:
-                    if isinstance(message, AssistantMessage):
-                        # Extract text content
-                        text_content = self._extract_text_from_message(message)
-                        if text_content:
-                            output["messages"].append({
-                                "type": "assistant",
-                                "content": text_content
+            # Debug: Log the structure of the result object
+            output["debug_info"]["result_type"] = type(result).__name__
+            
+            # Handle AssistantMessage (direct response from Claude)
+            if 'AssistantMessage' in str(type(result).__name__) or (hasattr(result, 'content') and hasattr(result, 'role') and result.role == 'assistant'):
+                text_content = self._extract_text_from_message(result)
+                if text_content:
+                    output["messages"].append({
+                        "type": "assistant",
+                        "content": text_content
+                    })
+                
+                # Extract tool uses if present
+                if hasattr(result, 'content'):
+                    for block in result.content:
+                        if hasattr(block, 'text'):  # TextBlock
+                            output["summary"] = block.text[:500]  # Store first 500 chars as summary
+                        elif hasattr(block, 'name'):  # ToolUseBlock
+                            output["tool_uses"].append({
+                                "tool": getattr(block, 'name', 'unknown'),
+                                "input": getattr(block, 'input', {})
                             })
-                        
-                        # Extract tool uses
-                        for block in message.content:
-                            if isinstance(block, ToolUseBlock):
-                                output["tool_uses"].append({
-                                    "tool": block.name,
-                                    "input": block.input
-                                })
-                    
-                    elif isinstance(message, ResultMessage):
-                        # Process tool results
-                        for block in message.content:
-                            if isinstance(block, ToolResultBlock):
-                                # Track file modifications, test results, etc.
-                                self._process_tool_result(block, output)
+            
+            # Handle ResultMessage (execution result)
+            elif 'ResultMessage' in str(type(result).__name__) or (hasattr(result, 'subtype') and result.subtype == 'success'):
+                # Extract result text if available
+                if hasattr(result, 'result'):
+                    output["summary"] = result.result[:500]  # Store first 500 chars as summary
+                    output["messages"].append({
+                        "type": "result",
+                        "content": result.result[:1000]  # Store first 1000 chars as a message
+                    })
+                
+                # Extract usage information if available
+                if hasattr(result, 'usage'):
+                    output["usage"] = result.usage
+                
+                # Extract other metadata
+                for attr in ['session_id', 'total_cost_usd', 'duration_ms']:
+                    if hasattr(result, attr):
+                        output[attr] = getattr(result, attr)
+            
+            # If we still have no messages, try to extract any text content directly
+            if not output["messages"] and hasattr(result, 'content'):
+                if isinstance(result.content, (list, tuple)):
+                    for item in result.content:
+                        if hasattr(item, 'text'):
+                            output["messages"].append({
+                                "type": "text",
+                                "content": item.text[:1000]  # Store first 1000 chars
+                            })
+                        elif hasattr(item, 'result'):
+                            output["messages"].append({
+                                "type": "result",
+                                "content": str(item.result)[:1000]  # Store first 1000 chars
+                            })
             
             # Generate summary
             output["summary"] = self._generate_response_summary(output)

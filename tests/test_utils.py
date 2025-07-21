@@ -109,15 +109,23 @@ def validate_task_result(result, expected_status: str = "completed") -> bool:
 
 
 def get_test_models() -> Dict[str, str]:
-    """Get test models based on available API keys"""
+    """Get test models based on available API keys and environment configuration"""
     keys = check_api_keys()
     models = {}
     
+    # Get models from environment with fallbacks
+    test_model = os.getenv("TEST_MODEL", "gpt-4.1-nano")
+    prod_model = os.getenv("PROD_MODEL", "gpt-4o-2024-05-13")
+    default_model = os.getenv("TEAM_DEFAULT_MODEL", test_model)
+    
     if keys["openai"]:
-        models["manager"] = "gpt-3.5-turbo"  # Use cheaper model for testing
+        # For tests, always use the test model (faster/cheaper)
+        models["manager"] = test_model
         models["claude"] = None
+        models["prod_manager"] = prod_model  # Keep prod model reference
     elif keys["anthropic"]:
-        models["manager"] = "claude-3-haiku-20240307"  # Use cheaper Claude model
+        # Fallback to Claude if OpenAI not available
+        models["manager"] = "claude-3-haiku-20240307"
         models["claude"] = "claude-3-haiku-20240307"
     
     return models

@@ -4,6 +4,7 @@ Engineering Manager Agent - Main orchestrator using LiteLLM
 
 import asyncio
 import json
+import os
 import time
 from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime
@@ -150,7 +151,7 @@ Return your response as JSON.
 class EngineeringManager(BaseAgent):
     """Engineering Manager agent that orchestrates other agents"""
     
-    def __init__(self, agent_id: str = "eng_manager", model: str = "gpt-4"):
+    def __init__(self, agent_id: str = "eng_manager", model: str = None, production: bool = False):
         super().__init__(
             agent_id=agent_id,
             name="Engineering Manager",
@@ -161,10 +162,19 @@ class EngineeringManager(BaseAgent):
             ]
         )
         
-        self.model = model
+        # Set model based on production flag if not explicitly provided
+        if model is None:
+            if production:
+                self.model = os.getenv("PROD_MODEL", "gpt-4o-2024-05-13")
+            else:
+                self.model = os.getenv("TEST_MODEL", "gpt-4.1-nano")
+        else:
+            self.model = model
+            
         self.console = Console()
-        self.task_decomposer = TaskDecomposer(model)
-        self.work_reviewer = WorkReviewer(model)
+        self.task_decomposer = TaskDecomposer(self.model)
+        self.work_reviewer = WorkReviewer(self.model)
+        self.production = production
         
         # Team management
         self.available_agents: Dict[str, BaseAgent] = {}
