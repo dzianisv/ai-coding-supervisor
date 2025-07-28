@@ -232,5 +232,10 @@ def configure(config_file, non_interactive, default_model, claude_model, default
     console.print(f"[green]✅ Configuration saved to {config_file}[/green]")
 
 
-if __name__ == '__main__':
+def main():
+    """Entry point for vibeteam-cli console script"""
     main_cli()
+
+
+if __name__ == '__main__':
+    main()

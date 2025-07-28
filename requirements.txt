@@ -1,4 +1,4 @@
-git+http://github.com/anthropics/claude-code-sdk-python
+claude-code-sdk @ git+https://github.com/anthropics/claude-code-sdk-python
 typing_extensions
 litellm>=1.35.0
 click>=8.1.0

@@ -60,5 +60,10 @@ async def main():
         logger.error(f"Server error: {e}")
         sys.exit(1)
 
-if __name__ == "__main__":
+def main_console():
+    """Entry point for vibeteam-mcp console script"""
     asyncio.run(main())
+
+
+if __name__ == "__main__":
+    main_console()

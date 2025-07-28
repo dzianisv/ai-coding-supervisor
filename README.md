@@ -25,27 +25,57 @@ A CLI-based multi-agent coding tool that uses AI to automate software developmen
 - **Smart Testing**: Comprehensive test suite with real LLM integration
 - **Extensible**: Plugin architecture for adding new agents and tools
 
+## 📦 Installation
+
+### Option 1: Install from GitHub (Recommended)
+
+```bash
+pip install git+https://github.com/VibeTechnologies/VibeTeam.git
+```
+
+### Option 2: Development Installation
+
+1. **Clone the repository**:
+   ```bash
+   git clone https://github.com/VibeTechnologies/VibeTeam.git
+   cd VibeTeam
+   ```
+
+2. **Install in development mode**:
+   ```bash
+   pip install -e .
+   # or for development with extra dependencies:
+   pip install -e .[dev]
+   ```
+
 ## ⚡ Quick Start
 
-1. **Install dependencies**:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-2. **Set API keys** (optional, needed for cloud models):
+1. **Set API keys** (required for Claude Code functionality):
    ```bash
    export ANTHROPIC_API_KEY="your-anthropic-key"
-   export OPENAI_API_KEY="your-openai-key"
    ```
 
-3. **Run the CLI**:
+2. **Run the automated task system**:
    ```bash
-   python -m cli.main_cli
+   vibeteam-task
    ```
+
+3. **Or use the interactive CLI**:
+   ```bash
+   vibeteam-cli
+   ```
+
+### Available Commands
+
+After installation, you'll have access to these commands:
+
+- **`vibeteam-task`** - Automated task completion from tasks.md
+- **`vibeteam-cli`** - Interactive multi-agent coding interface  
+- **`vibeteam-mcp`** - MCP server for ChatGPT/Claude integration
 
 ## 🤖 VibeCode Tasks - Automated Task Completion
 
-The `vibecode_tasks.py` system automatically reads tasks from `tasks.md` and completes them using Claude Code agents.
+The `vibeteam-task` command automatically reads tasks from `tasks.md` and completes them using Claude Code agents.
 
 ### Usage
 
@@ -58,7 +88,12 @@ The `vibecode_tasks.py` system automatically reads tasks from `tasks.md` and com
 
 2. **Run the automated task completion**:
    ```bash
-   python vibecode_tasks.py
+   vibeteam-task
+   ```
+
+   Or specify a different directory:
+   ```bash
+   vibeteam-task --dir /path/to/your/project
    ```
 
 The system will:
