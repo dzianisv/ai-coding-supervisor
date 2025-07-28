@@ -1,0 +1,21 @@
+apiVersion: v2
+name: mcp-server
+description: A Helm chart for deploying the MCP Server on Kubernetes
+
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+
+maintainers:
+  - name: MCP Team
+    url: https://github.com/vibetechnologies/mcp
+    email: mcp@vibetech.io
+
+keywords:
+  - mcp
+  - ai
+  - coding
+  - assistant
+
+sources:
+  - https://github.com/vibetechnologies/mcp
