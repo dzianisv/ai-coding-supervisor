@@ -1,0 +1,135 @@
+name: Smoke Tests
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'deploy/k8s/**'
+      - '.github/workflows/smoke-test.yml'
+  pull_request:
+    branches: [main, master]
+    paths:
+      - 'deploy/k8s/**'
+      - '.github/workflows/smoke-test.yml'
+  workflow_dispatch:
+
+jobs:
+  smoke-test:
+    name: Run Smoke Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: v3.13.1
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Set up kubectl
+        uses: azure/k8s-set-context@v3
+        with:
+          version: 'v1.26.0'
+
+      - name: Install kind
+        run: |
+          curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.20.0/kind-linux-amd64
+          chmod +x ./kind
+          sudo mv ./kind /usr/local/bin/kind
+
+      - name: Create KIND cluster
+        run: |
+          cat <<EOF | kind create cluster --config=-
+          kind: Cluster
+          apiVersion: kind.x-k8s.io/v1alpha4
+          nodes:
+          - role: control-plane
+            kubeadmConfigPatches:
+            - |
+              kind: InitConfiguration
+              nodeRegistration:
+                kubeletExtraArgs:
+                  node-labels: "ingress-ready=true"
+            extraPortMappings:
+            - containerPort: 80
+              hostPort: 80
+              protocol: TCP
+            - containerPort: 443
+              hostPort: 443
+              protocol: TCP
+          EOF
+
+      - name: Install NGINX Ingress
+        run: |
+          kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml
+          kubectl wait --namespace ingress-nginx \
+            --for=condition=ready pod \
+            --selector=app.kubernetes.io/component=controller \
+            --timeout=120s
+
+      - name: Install cert-manager
+        run: |
+          kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.2/cert-manager.yaml
+          kubectl wait --namespace cert-manager \
+            --for=condition=ready pod \
+            --selector=app.kubernetes.io/component=webhook \
+            --timeout=120s
+
+      - name: Lint Helm chart
+        run: |
+          cd deploy/k8s/chart
+          helm dependency update .
+          helm lint .
+
+      - name: Install Helm chart
+        run: |
+          kubectl create namespace mcp-test
+          helm install mcp-test deploy/k8s/chart \
+            --namespace mcp-test \
+            --set replicaCount=1 \
+            --set image.repository=ghcr.io/${{ github.repository }} \
+            --set image.tag=${{ github.sha }} \
+            --set image.pullPolicy=IfNotPresent \
+            --set service.type=ClusterIP \
+            --set ingress.enabled=true \
+            --set ingress.className=nginx \
+            --set ingress.hosts[0].host=mcp.local \
+            --set ingress.hosts[0].paths[0].path=/ \
+            --set ingress.hosts[0].paths[0].pathType=Prefix \
+            --set resources.limits.cpu=100m \
+            --set resources.limits.memory=128Mi \
+            --set resources.requests.cpu=50m \
+            --set resources.requests.memory=64Mi
+
+      - name: Wait for deployment to be ready
+        run: |
+          kubectl wait --namespace mcp-test \
+            --for=condition=ready pod \
+            --selector=app.kubernetes.io/name=mcp-server \
+            --timeout=180s
+
+      - name: Run smoke tests
+        run: |
+          # Test health endpoint
+          kubectl run -i --rm --restart=Never --image=curlimages/curl curl-test \
+            --namespace mcp-test -- /bin/sh -c '\
+            for i in $(seq 1 10); do
+              if curl -s http://mcp-test-mcp-server.mcp-test.svc.cluster.local:3333/healthz | grep -q "healthy"; then
+                echo "✅ Health check passed";
+                exit 0;
+              fi;
+              echo "⏳ Waiting for service to be ready...";
+              sleep 10;
+            done;
+            echo "❌ Health check failed";
+            exit 1;'
+
+      - name: Clean up
+        if: always()
+        run: |
+          kind delete cluster

@@ -1,8 +1,41 @@
 # MCP Server Deployment Guide
 
-This guide provides instructions for deploying the MCP Software Engineer Server both locally and on remote cloud providers.
+This guide provides instructions for deploying the MCP Software Engineer Server with various options from local development to production.
 
-## Option 1: Localhost Deployment (FREE)
+## Option 1: Cloudflare Tunnel (Recommended for Production)
+
+**Best for**: Secure, production-grade access without a public IP
+
+### Features
+- Free HTTPS with automatic Let's Encrypt certificates
+- Protection behind Cloudflare's global network
+- Optional SSO/authentication via Cloudflare Access
+- No need for a public IP address
+
+### Quick Start
+
+1. **Prerequisites**
+   - A domain managed by Cloudflare
+   - Cloudflare API Token with:
+     - Zone.DNS:Edit
+     - Account.Cloudflare Tunnel:Edit
+
+2. **Run the setup script**:
+   ```bash
+   chmod +x deploy/cloudflare/setup_tunnel.sh
+   ./deploy/cloudflare/setup_tunnel.sh
+   ```
+
+3. **Follow the prompts** to provide:
+   - Your Cloudflare API Token
+   - Your domain (e.g., `example.com`)
+   - Desired subdomain (e.g., `mcp` for `mcp.example.com`)
+
+4. **Access your MCP Server** at `https://your-subdomain.your-domain.com`
+
+For detailed instructions, see [deploy/cloudflare/README.md](./deploy/cloudflare/README.md)
+
+## Option 2: Localhost Deployment (FREE)
 
 **Best for**: Development, testing, local control
 

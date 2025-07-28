@@ -13,5 +13,5 @@ def type_and_enter(text):
 
 if __name__ == "__main__":
     print("Attempting to type 'continue' and press Enter...")
-    type_and_enter("Reflect on the results. Are you sure the task is done correctly? Should we take another approach? Continue.")
+    type_and_enter("Reflect on the results. Are you sure the task is done correctly? Should we take another approach? If you are 100% sure that task is done, take next task from tasks.md")
     print("Done.")
