@@ -43,6 +43,39 @@ A CLI-based multi-agent coding tool that uses AI to automate software developmen
    python -m cli.main_cli
    ```
 
+## 🤖 VibeCode Tasks - Automated Task Completion
+
+The `vibecode_tasks.py` system automatically reads tasks from `tasks.md` and completes them using Claude Code agents.
+
+### Usage
+
+1. **Create a tasks.md file** with checkbox-style tasks:
+   ```markdown
+   [ ] Write python hello world hello.py.
+   [ ] Simple html page hello world hello.html.
+   [ ] Create a REST API endpoint for user registration.
+   ```
+
+2. **Run the automated task completion**:
+   ```bash
+   python vibecode_tasks.py
+   ```
+
+The system will:
+- Read uncompleted tasks from `tasks.md`
+- Use Claude Code agent to complete each task
+- Create files, write tests, run tests, and fix issues
+- Mark tasks as completed in `tasks.md`
+- Commit changes to git
+
+### Features
+
+- ✅ **Automatic Task Detection**: Reads `[ ]` unchecked tasks from `tasks.md`
+- ✅ **Full Development Cycle**: Creates code, tests, runs tests, fixes issues
+- ✅ **Git Integration**: Reviews changes and commits completed work
+- ✅ **Error Handling**: Retries and fixes issues automatically
+- ✅ **Progress Tracking**: Updates `tasks.md` with completed tasks `[x]`
+
 ## 🛠 Usage
 
 ### Interactive Mode
