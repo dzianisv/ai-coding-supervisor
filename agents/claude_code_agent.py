@@ -50,7 +50,8 @@ class ClaudeCodeAgent(BaseAgent):
                  model: Optional[str] = None,
                  allowed_tools: Optional[List[str]] = None,
                  system_prompt: Optional[str] = None,
-                 permission_mode: Optional[str] = None):
+                 permission_mode: Optional[str] = None,
+                 debug_mode: bool = False):
         
         super().__init__(
             agent_id=agent_id,
@@ -70,6 +71,7 @@ class ClaudeCodeAgent(BaseAgent):
         self.allowed_tools = allowed_tools or []
         self.system_prompt = system_prompt
         self.permission_mode = permission_mode
+        self.debug_mode = debug_mode
         
         # Session management
         self.session_id: Optional[str] = None
@@ -186,8 +188,8 @@ Working directory: {self.working_directory}
             if self.permission_mode:
                 options.permission_mode = self.permission_mode
             
-            print(f"Executing Claude query with options: {options}")
-            print(f"Working directory: {self.working_directory}")
+            print(f"🚀 Starting task execution...")
+            print(f"📁 Working in: {self.working_directory}")
             
             try:
                 # Execute query with the prompt directly
@@ -201,17 +203,8 @@ Working directory: {self.working_directory}
                 results = []
                 try:
                     async for message in result_generator:
-                        # Log the raw message for debugging
-                        print(f"Raw Claude message: {message}")
-                        print(f"Message type: {type(message).__name__}")
-                        print(f"Message attributes: {[attr for attr in dir(message) if not attr.startswith('_')]}")
-                        
-                        if hasattr(message, 'content'):
-                            print(f"Message content type: {type(message.content).__name__}")
-                            if isinstance(message.content, (list, tuple)):
-                                for i, block in enumerate(message.content):
-                                    print(f"  Block {i} type: {type(block).__name__}")
-                                    print(f"  Block {i} attributes: {[attr for attr in dir(block) if not attr.startswith('_')]}")
+                        # Display human-readable message progress
+                        self._print_human_readable_message(message)
                         
                         results.append(message)
                         # Store session ID if available in the message
@@ -224,9 +217,7 @@ Working directory: {self.working_directory}
                     return results[-1] if results else None
                     
                 except Exception as e:
-                    print(f"Error iterating over Claude response: {e}")
-                    import traceback
-                    traceback.print_exc()
+                    print(f"❌ Error processing Claude response: {e}")
                     return None
                     
             except Exception as e:
@@ -240,21 +231,18 @@ Working directory: {self.working_directory}
                         text=True,
                         cwd=self.working_directory or "."
                     )
-                    print(f"Claude CLI version check output: {result.stdout}")
-                    print(f"Claude CLI version check error: {result.stderr}")
+                    if result.stdout.strip():
+                        print(f"🔍 Claude CLI: {result.stdout.strip()}")
+                    if result.stderr.strip():
+                        print(f"⚠️  CLI Warning: {result.stderr.strip()}")
                 except Exception as cli_error:
-                    print(f"Error running Claude CLI: {cli_error}")
+                    print(f"❌ Claude CLI not accessible: {cli_error}")
                 
-                print(f"Claude query failed with error: {e}")
-                print(f"Error type: {type(e).__name__}")
-                import traceback
-                traceback.print_exc()
+                print(f"❌ Task execution failed: {e}")
                 return None
                 
         except Exception as e:
-            print(f"Unexpected error in _execute_claude_query: {e}")
-            import traceback
-            traceback.print_exc()
+            print(f"❌ Unexpected error during task execution: {e}")
             return None
     
     async def _process_claude_response(self, result: Any) -> Dict[str, Any]:
@@ -344,6 +332,67 @@ Working directory: {self.working_directory}
             if isinstance(block, TextBlock):
                 text_parts.append(block.text)
         return "\n".join(text_parts)
+    
+    def _print_human_readable_message(self, message: Any):
+        """Print messages in a human-readable format instead of technical debug info"""
+        message_type = type(message).__name__
+        
+        # If debug mode is enabled, show the technical details too
+        if self.debug_mode:
+            print(f"[DEBUG] Raw Claude message: {message}")
+            print(f"[DEBUG] Message type: {message_type}")
+            print(f"[DEBUG] Message attributes: {[attr for attr in dir(message) if not attr.startswith('_')]}")
+            print()
+        
+        if message_type == 'AssistantMessage':
+            # Extract and display assistant's text response
+            if hasattr(message, 'content') and isinstance(message.content, (list, tuple)):
+                for block in message.content:
+                    if hasattr(block, 'text'):  # TextBlock
+                        # Display Claude's response with a nice prefix
+                        lines = block.text.strip().split('\n')
+                        print(f"🤖 Claude: {lines[0]}")
+                        for line in lines[1:]:
+                            if line.strip():
+                                print(f"       {line}")
+                    elif hasattr(block, 'name'):  # ToolUseBlock
+                        tool_name = getattr(block, 'name', 'unknown')
+                        print(f"🔧 Using tool: {tool_name}")
+        
+        elif message_type == 'UserMessage':
+            # Display user messages (if any)
+            if hasattr(message, 'content'):
+                print(f"👤 User: {str(message.content)[:100]}...")
+        
+        elif message_type == 'ResultMessage':
+            # Display execution results
+            if hasattr(message, 'subtype'):
+                subtype = message.subtype
+                if subtype == 'success':
+                    print("✅ Task completed successfully")
+                elif subtype == 'error':
+                    print("❌ Task encountered an error")
+                else:
+                    print(f"📋 Status: {subtype}")
+            
+            # Show summary if available
+            if hasattr(message, 'result') and message.result:
+                result_text = str(message.result)[:200]  # Limit to 200 chars
+                print(f"📄 Result: {result_text}...")
+            
+            # Show cost and timing info if available
+            if hasattr(message, 'total_cost_usd') and message.total_cost_usd:
+                print(f"💰 Cost: ${message.total_cost_usd:.4f}")
+            
+            if hasattr(message, 'duration_ms') and message.duration_ms:
+                duration_sec = message.duration_ms / 1000
+                print(f"⏱️  Duration: {duration_sec:.2f}s")
+        
+        else:
+            # For any other message types, show a simple indicator
+            print(f"📨 Received: {message_type}")
+        
+        print()  # Add a blank line for readability
     
     def _process_tool_result(self, tool_result: ToolResultBlock, output: Dict[str, Any]):
         """Process tool result and update output tracking"""
