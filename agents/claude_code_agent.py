@@ -334,7 +334,7 @@ Working directory: {self.working_directory}
         return "\n".join(text_parts)
     
     def _print_human_readable_message(self, message: Any):
-        """Print messages in a human-readable format instead of technical debug info"""
+        """Print messages in a human-readable format with detailed tool information"""
         message_type = type(message).__name__
         
         # If debug mode is enabled, show the technical details too
@@ -342,14 +342,14 @@ Working directory: {self.working_directory}
             print(f"[DEBUG] Raw Claude message: {message}")
             print(f"[DEBUG] Message type: {message_type}")
             print(f"[DEBUG] Message attributes: {[attr for attr in dir(message) if not attr.startswith('_')]}")
-            print()
+            print()  # Only add blank line in debug mode
         
         if message_type == 'AssistantMessage':
             # Extract and display assistant's text response
             if hasattr(message, 'content') and isinstance(message.content, (list, tuple)):
                 for block in message.content:
                     if hasattr(block, 'text'):  # TextBlock
-                        # Display Claude's response with a nice prefix
+                        # Display Claude's response with a nice prefix (compact format)
                         lines = block.text.strip().split('\n')
                         print(f"🤖 Claude: {lines[0]}")
                         for line in lines[1:]:
@@ -357,15 +357,53 @@ Working directory: {self.working_directory}
                                 print(f"       {line}")
                     elif hasattr(block, 'name'):  # ToolUseBlock
                         tool_name = getattr(block, 'name', 'unknown')
+                        tool_input = getattr(block, 'input', {})
+                        
+                        # Enhanced tool logging with parameters
                         print(f"🔧 Using tool: {tool_name}")
+                        
+                        # Show specific parameters based on tool type
+                        if tool_name == 'Bash' and 'command' in tool_input:
+                            print(f"   → Command: {tool_input['command']}")
+                        elif tool_name == 'Read' and 'file_path' in tool_input:
+                            print(f"   → File: {tool_input['file_path']}")
+                        elif tool_name == 'Write' and 'file_path' in tool_input:
+                            print(f"   → Writing: {tool_input['file_path']}")
+                        elif tool_name == 'Edit' and 'file_path' in tool_input:
+                            print(f"   → Editing: {tool_input['file_path']}")
+                        elif tool_name == 'Grep' and 'pattern' in tool_input:
+                            pattern = tool_input['pattern']
+                            path = tool_input.get('path', '.')
+                            print(f"   → Pattern: {pattern} (in {path})")
+                        elif tool_name == 'Glob' and 'pattern' in tool_input:
+                            pattern = tool_input['pattern']
+                            path = tool_input.get('path', '.')
+                            print(f"   → Glob: {pattern} (in {path})")
+                        else:
+                            # For other tools, show key parameters
+                            if tool_input:
+                                key_params = []
+                                for key, value in tool_input.items():
+                                    if key in ['file_path', 'command', 'pattern', 'url', 'prompt', 'content']:
+                                        if isinstance(value, str) and len(value) > 50:
+                                            key_params.append(f"{key}: {value[:47]}...")
+                                        else:
+                                            key_params.append(f"{key}: {value}")
+                                if key_params:
+                                    print(f"   → {', '.join(key_params)}")
         
         elif message_type == 'UserMessage':
-            # Display user messages (if any)
+            # Display user messages (if any) - compact format
             if hasattr(message, 'content'):
-                print(f"👤 User: {str(message.content)[:100]}...")
+                content_str = str(message.content)
+                # Look for tool_result pattern and extract meaningful info
+                if 'tool_result' in content_str:
+                    print(f"👤 User: [tool_result data]")
+                else:
+                    print(f"👤 User: {content_str[:100]}...")
         
         elif message_type == 'ResultMessage':
-            # Display execution results
+            # Display execution results - compact format
             if hasattr(message, 'subtype'):
                 subtype = message.subtype
                 if subtype == 'success':
@@ -375,24 +413,24 @@ Working directory: {self.working_directory}
                 else:
                     print(f"📋 Status: {subtype}")
             
-            # Show summary if available
+            # Show summary if available (compact)
             if hasattr(message, 'result') and message.result:
                 result_text = str(message.result)[:200]  # Limit to 200 chars
                 print(f"📄 Result: {result_text}...")
             
-            # Show cost and timing info if available
+            # Show cost and timing info if available (compact, same line)
+            info_parts = []
             if hasattr(message, 'total_cost_usd') and message.total_cost_usd:
-                print(f"💰 Cost: ${message.total_cost_usd:.4f}")
-            
+                info_parts.append(f"💰 ${message.total_cost_usd:.4f}")
             if hasattr(message, 'duration_ms') and message.duration_ms:
                 duration_sec = message.duration_ms / 1000
-                print(f"⏱️  Duration: {duration_sec:.2f}s")
+                info_parts.append(f"⏱️ {duration_sec:.2f}s")
+            if info_parts:
+                print(" | ".join(info_parts))
         
         else:
             # For any other message types, show a simple indicator
             print(f"📨 Received: {message_type}")
-        
-        print()  # Add a blank line for readability
     
     def _process_tool_result(self, tool_result: ToolResultBlock, output: Dict[str, Any]):
         """Process tool result and update output tracking"""
