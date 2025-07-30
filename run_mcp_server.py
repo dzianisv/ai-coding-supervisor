@@ -3,6 +3,7 @@
 MCP Server Startup Script
 
 Run this script to start the MCP server locally.
+Supports both stdio (standard MCP) and TCP modes.
 """
 import asyncio
 import logging
@@ -14,6 +15,7 @@ from pathlib import Path
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
+from mcp.vibeteam_mcp_server import main_console as stdio_main
 from mcp.software_engineer_server import SoftwareEngineerMCPServer
 from agents.claude_code_agent import ClaudeCodeAgent
 
@@ -28,8 +30,8 @@ def setup_logging():
         ]
     )
 
-async def main():
-    """Main function to start the MCP server"""
+async def tcp_main():
+    """Main function to start the TCP MCP server"""
     setup_logging()
     logger = logging.getLogger(__name__)
     
@@ -45,7 +47,7 @@ async def main():
     port = int(os.getenv('MCP_PORT', 8080))
     server = SoftwareEngineerMCPServer(agent=agent, port=port)
     
-    logger.info(f"Starting MCP server on port {port}")
+    logger.info(f"Starting TCP MCP server on port {port}")
     logger.info("Server will be accessible at:")
     logger.info(f"  - Local: http://localhost:{port}")
     logger.info(f"  - Network: http://0.0.0.0:{port}")
@@ -62,7 +64,12 @@ async def main():
 
 def main_console():
     """Entry point for vibeteam-mcp console script"""
-    asyncio.run(main())
+    # Check if TCP mode is requested
+    if "--tcp" in sys.argv or os.getenv("MCP_MODE") == "tcp":
+        asyncio.run(tcp_main())
+    else:
+        # Default to stdio mode (standard MCP)
+        stdio_main()
 
 
 if __name__ == "__main__":
