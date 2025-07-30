@@ -34,8 +34,9 @@ setup(
     description="AI-powered multi-agent coding tool with automated task completion",
     long_description=read_readme(),
     long_description_content_type="text/markdown",
-    url="https://github.com/VibeTechnologies/VibeTeam",
+    url="https://github.com/dzianisv/ai-coding-supervisor",
     packages=find_packages(exclude=['tests*', 'docs*', 'deploy*']),
+    py_modules=['vibecode_tasks', 'vibeteam_tasks'],
     classifiers=[
         "Development Status :: 4 - Beta",
         "Intended Audience :: Developers",
@@ -78,8 +79,8 @@ setup(
     },
     keywords="ai coding automation cli multi-agent development",
     project_urls={
-        "Bug Reports": "https://github.com/VibeTechnologies/VibeTeam/issues",
-        "Source": "https://github.com/VibeTechnologies/VibeTeam",
-        "Documentation": "https://github.com/VibeTechnologies/VibeTeam#readme",
+        "Bug Reports": "https://github.com/dzianisv/ai-coding-supervisor/issues",
+        "Source": "https://github.com/dzianisv/ai-coding-supervisor",
+        "Documentation": "https://github.com/dzianisv/ai-coding-supervisor#readme",
     },
 )

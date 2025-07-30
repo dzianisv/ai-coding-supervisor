@@ -30,15 +30,15 @@ A CLI-based multi-agent coding tool that uses AI to automate software developmen
 ### Option 1: Install from GitHub (Recommended)
 
 ```bash
-pip install git+https://github.com/VibeTechnologies/VibeTeam.git
+pip install git+https://github.com/dzianisv/ai-coding-supervisor.git
 ```
 
 ### Option 2: Development Installation
 
 1. **Clone the repository**:
    ```bash
-   git clone https://github.com/VibeTechnologies/VibeTeam.git
-   cd VibeTeam
+   git clone https://github.com/dzianisv/ai-coding-supervisor.git
+   cd ai-coding-supervisor
    ```
 
 2. **Install in development mode**:
