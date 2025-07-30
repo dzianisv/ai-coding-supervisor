@@ -70,7 +70,7 @@ setup(
         "console_scripts": [
             "vibeteam-task=vibecode_tasks:main",
             "vibeteam-cli=cli.main_cli:main",
-            "vibeteam-mcp=run_mcp_server:main_console",
+            "vibeteam-mcp=mcp.vibeteam_mcp_server:main_console",
         ],
     },
     include_package_data=True,
