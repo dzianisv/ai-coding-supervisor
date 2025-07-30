@@ -10,7 +10,7 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List
 
 # Add project root to path
 project_root = Path(__file__).parent.parent
@@ -167,25 +167,52 @@ class VibeTeamMCPServer:
             handler=self._handle_write_tests
         )
         
-        # Complete tasks from file
+        # Complete tasks from array
         self.server.add_tool(
             name="complete_tasks",
-            description="Complete tasks from a tasks.md file in the current directory",
+            description="Complete an array of tasks sequentially",
             parameters={
                 "type": "object",
                 "properties": {
+                    "tasks": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Array of task descriptions to complete"
+                    },
                     "max_tasks": {
                         "type": "integer",
-                        "description": "Maximum number of tasks to complete (default: all)"
-                    },
-                    "task_file": {
-                        "type": "string",
-                        "description": "Path to tasks file (default: tasks.md)"
+                        "description": "Maximum number of tasks to complete (optional, default: all)"
                     }
                 },
-                "required": []
+                "required": ["tasks"]
             },
             handler=self._handle_complete_tasks
+        )
+        
+        # VibeTeam task workflow (similar to vibeteam-task command)
+        self.server.add_tool(
+            name="vibeteam_task_workflow",
+            description="Execute the full vibeteam-task workflow: get task, complete it, test, fix issues, commit",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "tasks": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Array of task descriptions in checkbox format (e.g., '[ ] Implement feature X')"
+                    },
+                    "auto_commit": {
+                        "type": "boolean",
+                        "description": "Automatically commit changes after completing each task (default: false)"
+                    }
+                },
+                "required": ["tasks"]
+            },
+            handler=self._handle_vibeteam_task_workflow
         )
         
         # Manage project tool (Engineering Manager)
@@ -393,42 +420,129 @@ class VibeTeamMCPServer:
                 "error": str(e)
             }
             
-    async def _handle_complete_tasks(self, max_tasks: Optional[int] = None,
-                                   task_file: str = "tasks.md") -> Dict[str, Any]:
+    async def _handle_complete_tasks(self, tasks: List[str],
+                                   max_tasks: Optional[int] = None) -> Dict[str, Any]:
         """Handle complete_tasks tool."""
         try:
-            task_path = os.path.join(self.working_directory, task_file)
-            if not os.path.exists(task_path):
+            if not tasks:
                 return {
                     "status": "error",
-                    "error": f"Task file not found: {task_file}"
+                    "error": "No tasks provided"
                 }
                 
-            # Run vibecode_tasks logic
-            from vibecode_tasks import async_main
+            # Limit tasks if max_tasks is specified
+            tasks_to_complete = tasks[:max_tasks] if max_tasks else tasks
             
-            original_dir = os.getcwd()
-            try:
-                await async_main(working_dir=self.working_directory)
-                
-                # Read completed tasks
-                with open(task_path, 'r') as f:
-                    content = f.read()
+            agent = await self._ensure_claude_agent()
+            results = []
+            completed_count = 0
+            
+            # Process each task
+            for i, task in enumerate(tasks_to_complete):
+                try:
+                    logger.info(f"Processing task {i+1}/{len(tasks_to_complete)}: {task}")
                     
-                completed = content.count("[x]")
-                pending = content.count("[ ]")
-                
-                return {
-                    "status": "success",
-                    "completed_tasks": completed,
-                    "pending_tasks": pending,
-                    "task_file": task_file
-                }
-            finally:
-                os.chdir(original_dir)
+                    # Execute the task
+                    result = await agent.execute_task({
+                        "description": task
+                    })
+                    
+                    results.append({
+                        "task": task,
+                        "status": "completed",
+                        "result": result
+                    })
+                    completed_count += 1
+                    
+                except Exception as e:
+                    logger.error(f"Error processing task '{task}': {e}")
+                    results.append({
+                        "task": task,
+                        "status": "failed",
+                        "error": str(e)
+                    })
+                    
+            return {
+                "status": "success",
+                "total_tasks": len(tasks),
+                "processed_tasks": len(tasks_to_complete),
+                "completed_tasks": completed_count,
+                "failed_tasks": len(tasks_to_complete) - completed_count,
+                "results": results
+            }
                 
         except Exception as e:
             logger.error(f"Error completing tasks: {e}", exc_info=True)
+            return {
+                "status": "error",
+                "error": str(e)
+            }
+            
+    async def _handle_vibeteam_task_workflow(self, tasks: List[str],
+                                           auto_commit: bool = False) -> Dict[str, Any]:
+        """Handle vibeteam_task_workflow tool - full workflow like vibeteam-task command."""
+        try:
+            if not tasks:
+                return {
+                    "status": "error",
+                    "error": "No tasks provided"
+                }
+                
+            agent = await self._ensure_claude_agent()
+            results = []
+            
+            # The full prompt from vibeteam-task
+            base_prompt = "You are a software Engineer. Your task is to get a task from the following list. Complete it. Cover with test. Run test. Fix any related issues if any. Re-run test. Reflect. Review git diff. Reflect. Fix if any issues."
+            if auto_commit:
+                base_prompt += " Commit"
+                
+            # Process tasks that are not completed (start with [ ])
+            uncompleted_tasks = [t for t in tasks if t.strip().startswith("[ ]")]
+            
+            for i, task in enumerate(uncompleted_tasks):
+                try:
+                    # Extract task description (remove checkbox prefix)
+                    task_desc = task.strip()[3:].strip() if task.strip().startswith("[ ]") else task.strip()
+                    
+                    logger.info(f"Processing task {i+1}/{len(uncompleted_tasks)}: {task_desc}")
+                    
+                    # Create full prompt with specific task
+                    full_prompt = f"{base_prompt}\n\nTask to complete: {task_desc}"
+                    
+                    # Execute the full workflow
+                    result = await agent.execute_task({
+                        "description": full_prompt
+                    })
+                    
+                    results.append({
+                        "task": task_desc,
+                        "status": "completed",
+                        "result": result,
+                        "committed": auto_commit
+                    })
+                    
+                except Exception as e:
+                    logger.error(f"Error processing task '{task}': {e}")
+                    results.append({
+                        "task": task,
+                        "status": "failed",
+                        "error": str(e)
+                    })
+                    
+            completed_count = sum(1 for r in results if r["status"] == "completed")
+            
+            return {
+                "status": "success",
+                "total_tasks": len(tasks),
+                "uncompleted_tasks": len(uncompleted_tasks),
+                "processed_tasks": len(results),
+                "completed_tasks": completed_count,
+                "failed_tasks": len(results) - completed_count,
+                "results": results
+            }
+                
+        except Exception as e:
+            logger.error(f"Error in vibeteam task workflow: {e}", exc_info=True)
             return {
                 "status": "error",
                 "error": str(e)
