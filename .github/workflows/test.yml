@@ -120,28 +120,25 @@ jobs:
         echo "Testing MCP server in stdio mode..."
         
         # Create a simple test to verify the module can be imported
-        python -c "
-import sys
-sys.path.insert(0, '.')
-try:
-    from mcp.vibeteam_mcp_server import main_console
-    print('✅ MCP server module imported successfully')
-except Exception as e:
-    print(f'❌ Failed to import MCP server: {e}')
-    sys.exit(1)
-"
+        cat > test_import.py << 'EOF'
+        import sys
+        sys.path.insert(0, '.')
+        try:
+            from mcp.vibeteam_mcp_server import main_console
+            print('✅ MCP server module imported successfully')
+        except Exception as e:
+            print(f'❌ Failed to import MCP server: {e}')
+            sys.exit(1)
         
-        # Test that we can at least import the TCP server
-        python -c "
-import sys
-sys.path.insert(0, '.')
-try:
-    from mcp.software_engineer_server import SoftwareEngineerMCPServer
-    print('✅ TCP server module imported successfully')
-except Exception as e:
-    print(f'❌ Failed to import TCP server: {e}')
-    sys.exit(1)
-"
+        try:
+            from mcp.software_engineer_server import SoftwareEngineerMCPServer
+            print('✅ TCP server module imported successfully')
+        except Exception as e:
+            print(f'❌ Failed to import TCP server: {e}')
+            sys.exit(1)
+        EOF
+        
+        python test_import.py
       env:
         MCP_MODE: stdio
         PYTHONPATH: ${{ github.workspace }}
