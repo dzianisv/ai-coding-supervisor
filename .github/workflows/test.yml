@@ -43,7 +43,7 @@ jobs:
       run: |
         pytest tests/ -v --cov=agents --cov=mcp --cov=cli --cov=utils \
                --cov-report=xml --cov-report=term \
-               -k "not integration and not e2e and not tunnel" \
+               -k "not integration and not e2e and not tunnel and not requires_api_key" \
                --timeout=60
       env:
         PYTHONPATH: ${{ github.workspace }}
