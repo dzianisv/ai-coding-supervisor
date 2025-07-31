@@ -29,8 +29,10 @@ jobs:
         # Verify installation
         cloudflared --version
         
-        # Create symlink in project directory for tests
-        ln -s /usr/local/bin/cloudflared ./cloudflared
+        # Create symlink in project directory for tests (if it doesn't exist)
+        if [ ! -e ./cloudflared ]; then
+          ln -s /usr/local/bin/cloudflared ./cloudflared
+        fi
     
     - name: Cache pip packages
       uses: actions/cache@v3
