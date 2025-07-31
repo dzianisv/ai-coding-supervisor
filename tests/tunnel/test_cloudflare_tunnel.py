@@ -88,9 +88,26 @@ class TestCloudfareTunnel:
     
     def start_cloudflare_tunnel(self, port):
         """Start Cloudflare tunnel pointing to given port."""
-        cloudflared_path = "./cloudflared"
-        if not os.path.exists(cloudflared_path):
-            pytest.skip("cloudflared binary not found")
+        # Try multiple locations for cloudflared
+        cloudflared_paths = [
+            "./cloudflared",
+            "/usr/local/bin/cloudflared",
+            "cloudflared"  # In PATH
+        ]
+        
+        cloudflared_path = None
+        for path in cloudflared_paths:
+            try:
+                # Check if we can execute it
+                result = subprocess.run([path, "--version"], capture_output=True)
+                if result.returncode == 0:
+                    cloudflared_path = path
+                    break
+            except:
+                continue
+        
+        if not cloudflared_path:
+            pytest.skip("cloudflared binary not found in any expected location")
         
         process = subprocess.Popen(
             [cloudflared_path, 'tunnel', '--url', f'http://localhost:{port}'],
