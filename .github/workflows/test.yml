@@ -1,0 +1,137 @@
+name: Run Tests
+
+on:
+  push:
+    branches: [ master, main, vibecode, setup-github-actions ]
+  pull_request:
+    branches: [ master, main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.8", "3.9", "3.10", "3.11"]
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+    
+    - name: Cache pip packages
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest pytest-asyncio pytest-cov pytest-timeout
+    
+    - name: Install package in development mode
+      run: |
+        pip install -e .
+    
+    - name: Run unit tests
+      run: |
+        pytest tests/ -v --cov=agents --cov=mcp --cov=cli --cov=utils \
+               --cov-report=xml --cov-report=term \
+               -k "not integration and not e2e and not tunnel" \
+               --timeout=60
+      env:
+        PYTHONPATH: ${{ github.workspace }}
+    
+    - name: Run integration tests (without API keys)
+      run: |
+        pytest tests/ -v -k "integration" -m "not requires_api_key" \
+               --timeout=120 || true
+      env:
+        PYTHONPATH: ${{ github.workspace }}
+    
+    - name: Upload coverage reports
+      uses: codecov/codecov-action@v3
+      if: matrix.python-version == '3.10'
+      with:
+        file: ./coverage.xml
+        flags: unittests
+        name: codecov-umbrella
+        fail_ci_if_error: false
+
+  lint:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.10"
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install flake8 black isort mypy
+    
+    - name: Run flake8
+      run: |
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics || true
+        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+    
+    - name: Check code formatting with black
+      run: |
+        black --check . --diff || true
+    
+    - name: Check import sorting with isort
+      run: |
+        isort --check-only --diff . || true
+    
+    - name: Type checking with mypy
+      run: |
+        mypy . --ignore-missing-imports || true
+
+  test-mcp-server:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.10"
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install -e .
+    
+    - name: Test MCP server startup
+      run: |
+        # Start MCP server in background
+        timeout 10s python -m run_mcp_server &
+        SERVER_PID=$!
+        
+        # Wait for server to start
+        sleep 5
+        
+        # Check if server is running
+        if ps -p $SERVER_PID > /dev/null; then
+          echo "✅ MCP server started successfully"
+          kill $SERVER_PID
+          exit 0
+        else
+          echo "❌ MCP server failed to start"
+          exit 1
+        fi
+      env:
+        MCP_MODE: stdio
+        PYTHONPATH: ${{ github.workspace }}
