@@ -107,6 +107,14 @@ jobs:
                 # Give it time to start
                 time.sleep(5)
                 
+                # Check if server started properly
+                if mcp_process.poll() is not None:
+                    stdout, stderr = mcp_process.communicate()
+                    print(f"❌ MCP server exited with code {mcp_process.returncode}")
+                    print(f"STDOUT: {stdout}")
+                    print(f"STDERR: {stderr}")
+                    return False
+                
                 # Start cloudflare tunnel
                 print("Starting Cloudflare tunnel...")
                 tunnel_process = subprocess.Popen(

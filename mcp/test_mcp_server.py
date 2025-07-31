@@ -9,13 +9,20 @@ import logging
 from typing import Dict, Any, Optional
 from pathlib import Path
 import sys
+import os
 
 # Add project root to path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from mcp.base_mcp_server import BaseMCPServer
-from mcp.stdio_server import StdioMCPServer
+try:
+    from mcp.base_mcp_server import BaseMCPServer
+    from mcp.stdio_server import StdioMCPServer
+except ImportError:
+    # Fallback for when running as a script
+    sys.path.insert(0, str(Path(__file__).parent))
+    from base_mcp_server import BaseMCPServer
+    from stdio_server import StdioMCPServer
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
