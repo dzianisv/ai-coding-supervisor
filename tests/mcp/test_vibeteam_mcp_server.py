@@ -10,6 +10,7 @@ These tests verify the complete MCP server functionality including:
 import asyncio
 import json
 import pytest
+import pytest_asyncio
 import sys
 import os
 from pathlib import Path
