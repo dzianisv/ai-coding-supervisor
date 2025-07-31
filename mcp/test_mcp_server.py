@@ -214,32 +214,52 @@ async def main():
     await server.run()
 
 
-# Also support TCP mode for testing
-class TestTCPMCPServer(BaseMCPServer):
-    """Test TCP MCP server."""
+# Simple TCP server for testing
+async def run_tcp_test_server(port: int):
+    """Run a simple TCP test server that responds to MCP requests."""
     
-    def __init__(self, port: int = 3333):
-        self.agent = MockAgent()
-        super().__init__(agent=self.agent, port=port)
-        
-        # Override capabilities
-        self.server_info["capabilities"]["agent"] = {
-            "type": "vibeteam-test-tcp",
-            "version": "1.0.0",
-            "capabilities": ["code_generation", "code_review", "task_execution"]
-        }
+    async def handle_client(reader, writer):
+        """Handle TCP client connections."""
+        try:
+            while True:
+                data = await reader.read(1024)
+                if not data:
+                    break
+                
+                # Simple echo response for testing
+                response = {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "result": {
+                        "capabilities": {
+                            "agent": {
+                                "type": "test-tcp-server",
+                                "version": "1.0.0"
+                            }
+                        },
+                        "serverInfo": {
+                            "name": "test-vibeteam-tcp",
+                            "version": "1.0.0"
+                        }
+                    }
+                }
+                
+                writer.write((json.dumps(response) + '\n').encode())
+                await writer.drain()
+                
+        except Exception as e:
+            logger.error(f"Client handler error: {e}")
+        finally:
+            writer.close()
+            await writer.wait_closed()
     
-    async def handle_execute_code(self, message: Dict) -> Dict:
-        """Handle code execution."""
-        params = message.get("params", {})
-        result = await self.agent.execute_task(params.get("code", ""))
-        return self.format_mcp_response(message, result)
+    server = await asyncio.start_server(handle_client, '0.0.0.0', port)
     
-    async def handle_generate_code(self, message: Dict) -> Dict:
-        """Handle code generation."""
-        params = message.get("params", {})
-        result = self.agent.generate_code(params.get("specification", ""))
-        return self.format_mcp_response(message, result)
+    addr = server.sockets[0].getsockname()
+    logger.info(f'Test TCP server listening on {addr}')
+    
+    async with server:
+        await server.serve_forever()
 
 
 async def main_tcp():
@@ -247,9 +267,8 @@ async def main_tcp():
     import os
     port = int(os.getenv("MCP_PORT", 3333))
     
-    server = TestTCPMCPServer(port=port)
     logger.info(f"Starting Test TCP MCP Server on port {port} (no API keys required)...")
-    await server.start()
+    await run_tcp_test_server(port)
 
 
 if __name__ == "__main__":
