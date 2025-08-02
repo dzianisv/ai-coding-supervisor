@@ -98,6 +98,7 @@ class TestMCPCommand:
             process.terminate()
             process.wait(timeout=5)
             
+    @pytest.mark.requires_api_key
     def test_mcp_server_tcp_mode(self):
         """Test that TCP mode can be started."""
         # Start server in TCP mode
@@ -134,6 +135,7 @@ class TestMCPCommand:
 class TestMCPServerScenarios:
     """Test realistic usage scenarios."""
     
+    @pytest.mark.requires_api_key
     async def test_code_review_scenario(self, tmp_path):
         """Test a code review scenario through MCP."""
         # Start the MCP server process

@@ -17,6 +17,9 @@ Uses stdio (stdin/stdout) for communication, compatible with MCP clients:
 vibeteam-mcp
 ```
 
+This mode accepts tasks as input parameters rather than reading from filesystem,
+making it suitable for integration with any MCP client.
+
 ### 2. TCP Mode
 Legacy TCP socket mode for backward compatibility:
 ```bash
@@ -92,13 +95,33 @@ Write unit tests for code.
 ```
 
 ### complete_tasks
-Complete tasks from a tasks.md file.
+Complete an array of tasks sequentially.
 ```json
 {
   "name": "complete_tasks",
   "arguments": {
-    "max_tasks": 5,  // optional, defaults to all
-    "task_file": "tasks.md"  // optional, defaults to tasks.md
+    "tasks": [
+      "Implement user authentication",
+      "Add password reset functionality",
+      "Write unit tests for auth module"
+    ],
+    "max_tasks": 2  // optional, defaults to all
+  }
+}
+```
+
+### vibeteam_task_workflow
+Execute the full vibeteam-task workflow (complete task, test, fix issues, optionally commit).
+```json
+{
+  "name": "vibeteam_task_workflow",
+  "arguments": {
+    "tasks": [
+      "[ ] Implement user authentication",
+      "[ ] Add password reset functionality",
+      "[x] Setup project structure"  // Will be skipped (already done)
+    ],
+    "auto_commit": true  // optional, defaults to false
   }
 }
 ```

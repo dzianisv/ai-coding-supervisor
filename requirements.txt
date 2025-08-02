@@ -8,3 +8,6 @@ aiofiles>=23.0.0
 pytest>=7.0.0
 pytest-asyncio>=0.21.0
 psutil>=5.9.0
+flask>=2.0.0
+langgraph>=0.0.40
+openai>=1.0.0

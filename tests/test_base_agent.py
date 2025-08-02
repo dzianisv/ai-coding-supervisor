@@ -13,8 +13,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from agents.base_agent import BaseAgent, AgentCapability, AgentStatus, AgentMessage, TaskResult
 
 
-class TestAgent(BaseAgent):
-    """Test implementation of BaseAgent"""
+class MockAgent(BaseAgent):
+    """Mock implementation of BaseAgent for testing"""
     
     def __init__(self):
         super().__init__(
@@ -38,7 +38,7 @@ class TestAgent(BaseAgent):
 @pytest.mark.asyncio
 async def test_agent_initialization():
     """Test agent initialization"""
-    agent = TestAgent()
+    agent = MockAgent()
     
     assert agent.agent_id == "test_agent"
     assert agent.name == "Test Agent"
@@ -49,8 +49,8 @@ async def test_agent_initialization():
 @pytest.mark.asyncio
 async def test_message_handling():
     """Test message sending and receiving"""
-    agent1 = TestAgent()
-    agent2 = TestAgent()
+    agent1 = MockAgent()
+    agent2 = MockAgent()
     
     message = AgentMessage(
         sender_id=agent1.agent_id,
@@ -75,7 +75,7 @@ async def test_message_handling():
 @pytest.mark.asyncio
 async def test_task_execution():
     """Test task execution"""
-    agent = TestAgent()
+    agent = MockAgent()
     
     task = {"id": "test_task", "description": "test description"}
     result = await agent.execute_task(task)

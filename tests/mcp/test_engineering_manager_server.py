@@ -3,7 +3,7 @@ Tests for the Engineering Manager MCP server
 """
 import pytest
 import json
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from mcp.engineering_manager_server import EngineeringManagerMCPServer
 
 class TestEngineeringManagerMCPServer:
@@ -11,7 +11,10 @@ class TestEngineeringManagerMCPServer:
     
     @pytest.fixture
     def mock_manager(self):
-        return AsyncMock()
+        mock = AsyncMock()
+        # get_team_status is a sync method, not async
+        mock.get_team_status = MagicMock()
+        return mock
     
     @pytest.fixture
     def server(self, mock_manager):
