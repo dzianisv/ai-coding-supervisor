@@ -8,10 +8,10 @@ import tempfile
 import shutil
 from pathlib import Path
 
-# Add the project root to sys.path to allow importing vibecode_tasks
+# Add the project root to sys.path to allow importing vibeteam_tasks
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from vibecode_tasks import main as vibecode_main
+from vibeteam_tasks import main as vibeteam_main
 
 @pytest.mark.integration
 @pytest.mark.requires_api
@@ -44,12 +44,12 @@ async def test_vibecode_tasks_full_integration():
         # In a real scenario, you might want to run this as a subprocess
         # and poll for file changes.
         
-        # Since vibecode_main has a while True loop, we need to ensure it exits.
+        # Since vibeteam_main has a while True loop, we need to ensure it exits.
         # For this test, we'll modify vibecode_tasks.py to exit after one iteration
         # or mock the loop condition. For now, let's assume it will eventually exit
         # when tasks are done, or we'll need to adjust vibecode_tasks.py.
         
-        # For the purpose of this test, we will run vibecode_main once.
+        # For the purpose of this test, we will run vibeteam_main once.
         # The actual vibecode_tasks.py has a loop, which would require a more complex
         # subprocess management or mocking the loop condition.
         # Let's assume for this test that one call to main() is enough to trigger

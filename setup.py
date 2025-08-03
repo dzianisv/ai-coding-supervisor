@@ -36,7 +36,7 @@ setup(
     long_description_content_type="text/markdown",
     url="https://github.com/dzianisv/ai-coding-supervisor",
     packages=find_packages(exclude=['tests*', 'docs*', 'deploy*']),
-    py_modules=['vibecode_tasks', 'vibeteam_tasks'],
+    py_modules=['vibeteam_tasks'],
     classifiers=[
         "Development Status :: 4 - Beta",
         "Intended Audience :: Developers",
@@ -67,7 +67,7 @@ setup(
     },
     entry_points={
         "console_scripts": [
-            "vibeteam-task=vibecode_tasks:main",
+            "vibeteam-task=vibeteam_tasks:main",
             "vibeteam-cli=cli.main_cli:main",
             "vibeteam-mcp=mcp.vibeteam_mcp_server:main_console",
         ],
