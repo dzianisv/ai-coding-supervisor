@@ -50,9 +50,14 @@ pip install git+https://github.com/VibeTechnologies/VibeTeam.git
 
 ## ⚡ Quick Start
 
-1. **Set API keys** (required for Claude Code functionality):
+1. **Set API keys** (required for AI functionality):
    ```bash
+   # For Claude Code functionality (primary)
    export ANTHROPIC_API_KEY="your-anthropic-key"
+   
+   # For OpenAI reflection and analysis (optional)
+   export OPENAI_API_KEY="your-openai-key"
+   export OPENAI_BASE_URL="https://api.openai.com/v1"  # optional, for custom endpoints
    ```
 
 2. **Run the automated task system**:
@@ -60,18 +65,39 @@ pip install git+https://github.com/VibeTechnologies/VibeTeam.git
    vibeteam-task
    ```
 
-3. **Or use the interactive CLI**:
+3. **Use with reflection (enhanced quality)**:
    ```bash
-   vibeteam-cli
+   vibeteam-task --enable-reflection --debug
+   ```
+
+4. **Run the MCP server** (for ChatGPT/Claude integration):
+   ```bash
+   vibeteam-mcp
    ```
 
 ### Available Commands
 
 After installation, you'll have access to these commands:
 
-- **`vibeteam-task`** - Automated task completion from tasks.md
+- **`vibeteam-task`** - Automated task completion from tasks.md with optional OpenAI reflection
 - **`vibeteam-cli`** - Interactive multi-agent coding interface  
-- **`vibeteam-mcp`** - MCP server for ChatGPT/Claude integration
+- **`vibeteam-mcp`** - Model Context Protocol (MCP) server for ChatGPT/Claude integration
+
+### Command Options
+
+```bash
+# Basic task automation
+vibeteam-task
+
+# Task automation with OpenAI reflection (enhanced quality)
+vibeteam-task --enable-reflection --debug
+
+# Custom directory and tasks file
+vibeteam-task --dir /path/to/project --tasks-file my-tasks.md
+
+# MCP server
+vibeteam-mcp                    # Standard MCP protocol (stdio)
+```
 
 ## 🤖 VibeCode Tasks - Automated Task Completion
 
@@ -102,6 +128,7 @@ The system will:
 - Create files, write tests, run tests, and fix issues
 - Mark tasks as completed in `tasks.md`
 - Commit changes to git
+- Optionally use OpenAI for reflection and quality analysis
 
 ### Features
 
@@ -110,6 +137,42 @@ The system will:
 - ✅ **Git Integration**: Reviews changes and commits completed work
 - ✅ **Error Handling**: Retries and fixes issues automatically
 - ✅ **Progress Tracking**: Updates `tasks.md` with completed tasks `[x]`
+- ✅ **OpenAI Reflection**: Optional quality analysis and improvement suggestions
+- ✅ **MCP Server**: Standard Model Context Protocol for ChatGPT/Claude integration
+- ✅ **Deployment Ready**: Docker, Cloudflare Tunnel, Kubernetes support
+
+## 🌐 MCP Server (Model Context Protocol)
+
+VibeTeam includes a full MCP server implementation that exposes AI coding capabilities to ChatGPT, Claude, and other MCP clients.
+
+### Available Tools
+- `execute_task` - Execute coding tasks with Claude Code Agent
+- `review_code` - Review code for quality and improvements  
+- `generate_code` - Generate code from specifications
+- `fix_code` - Fix bugs and issues in code
+- `write_tests` - Create unit tests for code
+- `complete_tasks` - Complete tasks from tasks.md
+- `manage_project` - Use Engineering Manager for coordination
+
+### Deployment Options
+
+1. **Local Development**:
+   ```bash
+   vibeteam-mcp  # Standard MCP protocol
+   ```
+
+2. **Public Access via Cloudflare**:
+   ```bash
+   ./deploy/cloudflare/setup_tunnel.sh
+   ```
+
+3. **Docker Deployment**:
+   ```bash
+   docker build -t vibeteam .
+   docker run -p 8080:8080 vibeteam
+   ```
+
+See [DEPLOYMENT.md](./DEPLOYMENT.md) for detailed deployment instructions.
 
 ## 🛠 Usage
 
@@ -132,162 +195,116 @@ pytest tests/
 
 Run specific test categories:
 ```bash
-# Unit tests
-pytest tests/unit
+# Core functionality tests
+pytest tests/test_*.py
 
-# Integration tests (requires API keys)
-pytest tests/integration
+# MCP server tests
+pytest tests/mcp/
 
-# Performance tests
-pytest tests/performance
+# Cloudflare tunnel tests
+pytest tests/tunnel/
 ```
+
+**Note**: Some tests require API keys to be set. Tests are automatically run via GitHub Actions on push/PR.
 
 ## 🏗 Architecture
 
 ### Core Components
-- **Engineering Manager**: Orchestrates tasks using LiteLLM
-- **Claude Code Agent**: Executes coding tasks with Claude
-- **CLI Interface**: Rich terminal interface for interaction
-- **Test Suite**: Comprehensive tests with real LLM integration
-
-## 📚 Documentation
-
-- [Testing Guide](TESTING.md): How to run and write tests
-- [API Reference](docs/API.md): Detailed API documentation
-- [Development Guide](docs/DEVELOPMENT.md): Contributing to the project
-
-4. **Agent Registry** (`agents/agent_registry.py`)
-   - Manages agent registration and discovery
-   - Provides capability-based agent lookup
-   - Handles agent lifecycle management
-
-5. **CLI Interface** (`cli/`)
-   - Interactive team management interface
-   - Progress tracking and status display
-   - Configuration management
-
-### Workflow
-
-1. **Task Input**: User provides a high-level coding task
-2. **Decomposition**: Engineering Manager breaks task into subtasks
-3. **Assignment**: Subtasks are assigned to appropriate coding agents
-4. **Execution**: Agents execute their assigned subtasks
-5. **Review**: Engineering Manager reviews completed work
-6. **Feedback**: Revision requests are sent if needed
-7. **Integration**: Results are compiled into final output
-
-## Configuration
-
-### Configuration File (`team_config.json`)
-```json
-{
-  "default_model": "gpt-4",
-  "claude_model": "claude-3-sonnet-20240229",
-  "default_agents": 2,
-  "working_directory": "/path/to/project",
-  "max_task_time": 3600,
-  "retry_attempts": 3,
-  "log_level": "INFO"
-}
-```
-
-### Environment Variables
-- `TEAM_DEFAULT_MODEL`: Model for Engineering Manager
-- `TEAM_CLAUDE_MODEL`: Model for Claude coding agents
-- `TEAM_DEFAULT_AGENTS`: Number of coding agents to spawn
-- `TEAM_WORKING_DIR`: Default working directory
-- `TEAM_LOG_LEVEL`: Logging level (DEBUG, INFO, WARNING, ERROR)
-
-## Command Reference
-
-### Main Commands
-- `start`: Launch interactive team interface
-- `execute <task>`: Execute single task and exit
-- `configure`: Interactive configuration setup
-- `status`: Show team status (for persistent sessions)
-
-### Interactive Commands
-- `task <description>`: Execute a coding task
-- `status`: Show current team status
-- `agents`: List all registered agents
-- `history`: Show recent task history
-- `help`: Show available commands
-- `quit`: Exit the interface
-
-### Options
-- `--working-dir, -w`: Set working directory
-- `--model, -m`: Set Engineering Manager model
-- `--claude-model`: Set Claude agent model
-- `--agents, -a`: Number of coding agents
-- `--verbose, -v`: Enable verbose output
-- `--output, -o`: Output file for results
-
-## Development
+- **Claude Code Agent**: Primary coding agent using Anthropic Claude via claude-code-sdk
+- **Engineering Manager**: Task orchestration and quality control
+- **MCP Server**: Standard Model Context Protocol implementation for external AI integration
+- **Task Automation**: File-based task management with `tasks.md`
+- **Reflection Module**: Optional OpenAI-powered quality analysis and improvement suggestions
+- **Deployment Infrastructure**: Docker, Cloudflare Tunnel, Kubernetes support
 
 ### Project Structure
 ```
 VibeTeam/
 ├── agents/                 # Agent implementations
-│   ├── base_agent.py      # Abstract base agent
-│   ├── engineering_manager.py  # Main orchestrator
-│   ├── claude_code_agent.py    # Claude coding agent
-│   └── agent_registry.py       # Agent management
-├── cli/                   # CLI interface
-│   ├── main_cli.py       # Main CLI commands
-│   └── interface.py      # Interactive interface
-├── utils/                # Utilities
-│   ├── logging.py        # Logging setup
-│   └── config.py         # Configuration management
-├── tests/                # Test files
-├── tasks.md             # Technical task breakdown
-├── requirements.txt     # Dependencies
-└── team_coding_tool.py  # Main entry point
+│   ├── claude_code_agent.py    # Primary coding agent
+│   ├── engineering_manager.py  # Task orchestration
+│   └── base_agent.py          # Base agent class
+├── mcp/                   # Model Context Protocol server
+│   ├── vibeteam_mcp_server.py  # Main MCP implementation
+│   └── stdio_server.py         # Standard MCP protocol
+├── cli/                   # Command-line interface
+├── tests/                 # Comprehensive test suite
+├── deploy/                # Deployment configurations
+│   ├── cloudflare/           # Cloudflare Tunnel setup
+│   ├── k8s/                  # Kubernetes manifests
+│   └── local/               # Local development
+└── vibeteam_tasks.py      # Main task automation script
 ```
 
-### Adding New Agents
-1. Inherit from `BaseAgent`
-2. Implement required methods (`execute_task`, `review_work`)
-3. Register capabilities in constructor
-4. Register with `AgentRegistry`
+### Workflow
 
-### Extending Functionality
-- Add new agent capabilities in `AgentCapability` enum
-- Implement custom task decomposition strategies
-- Add new CLI commands in `main_cli.py`
-- Extend configuration options in `config.py`
+1. **Task Input**: Create tasks in `tasks.md` with checkbox format `[ ] Task description`
+2. **Execution**: Run `vibeteam-task` to automatically process unchecked tasks
+3. **AI Processing**: Claude Code Agent analyzes task and generates solution
+4. **Quality Control**: Optional OpenAI reflection provides analysis and suggestions
+5. **Testing**: Automatically creates and runs tests for generated code
+6. **Git Integration**: Reviews changes and commits completed work
+7. **Task Completion**: Marks tasks as done `[x]` in `tasks.md`
+
+## 📚 Documentation
+
+- [Deployment Guide](DEPLOYMENT.md): Complete deployment options and setup
+- [MCP Server Guide](mcp/README.md): Model Context Protocol implementation details
+- [Testing Guide](TESTING.md): How to run and write tests
+- [GitHub Actions](.github/workflows/): Automated CI/CD workflows
+
+## Configuration
+
+### Environment Variables
+
+**Required:**
+```bash
+ANTHROPIC_API_KEY="your-anthropic-key"    # For Claude Code Agent
+```
+
+**Optional:**
+```bash
+OPENAI_API_KEY="your-openai-key"          # For reflection analysis
+OPENAI_BASE_URL="https://api.openai.com/v1"  # Custom OpenAI endpoint
+VIBETEAM_WORKING_DIR="/path/to/project"   # Default working directory
+```
 
 ## Troubleshooting
 
 ### Common Issues
 
-1. **Import Errors**: Ensure claude-code-sdk-python is properly installed
-2. **API Key Issues**: Set required environment variables for LiteLLM and Claude
-3. **Permission Errors**: Check file permissions in working directory
-4. **Model Access**: Verify API keys and model availability
+1. **API Key Missing**: Set `ANTHROPIC_API_KEY` environment variable
+2. **Task Timeout**: Tasks may take several minutes to complete
+3. **Git Issues**: Ensure git is configured and working directory is a git repo
+4. **Test Failures**: Some tests require internet access and API keys
 
 ### Debug Mode
-Enable verbose logging:
+Enable detailed logging:
 ```bash
-python team_coding_tool.py start --verbose
+vibeteam-task --debug
 ```
 
 ### Logs
-Check log files in the `logs/` directory for detailed execution information.
+- MCP server logs: `vibeteam-mcp.log`
+- Task execution logs: `mcp_server.log`
 
 ## Contributing
 
 1. Fork the repository
-2. Create a feature branch
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
 3. Make your changes
 4. Add tests if applicable
-5. Submit a pull request
+5. Commit your changes (`git commit -m 'Add amazing feature'`)
+6. Push to the branch (`git push origin feature/amazing-feature`)
+7. Open a Pull Request
 
 ## License
 
-[Add your license information here]
+MIT License - see LICENSE file for details
 
 ## Acknowledgments
 
-- Built on top of claude-code-sdk-python
-- Uses LiteLLM for multi-model support
-- Rich library for beautiful CLI interfaces
+- Built with claude-code-sdk-python for AI agent functionality
+- Model Context Protocol (MCP) for standardized AI integration
+- OpenAI API for reflection and quality analysis
+- Docker and Cloudflare for deployment infrastructure

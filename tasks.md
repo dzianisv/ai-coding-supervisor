@@ -1,7 +1,3 @@
-# Tasks
+# VibeTeam Tasks
 
-## Development Tasks
-
-[ ] Create a simple utility function to validate email addresses with proper regex pattern
-[ ] Add unit tests for the email validation function
-[ ] Update documentation for the new utility function
+[x] Write python hello world. The output has to be a script that prints "Hello, world!". Engineering Manager subagent has to verify it.

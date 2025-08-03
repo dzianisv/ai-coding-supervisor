@@ -2,10 +2,8 @@
 """
 MCP Server Startup Script
 
-Run this script to start the MCP server locally.
-Supports both stdio (standard MCP) and TCP modes.
+Run this script to start the VibeTeam MCP server using the standard MCP protocol.
 """
-import asyncio
 import logging
 import sys
 import os
@@ -16,8 +14,6 @@ project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
 from mcp.vibeteam_mcp_server import main_console as stdio_main
-from mcp.software_engineer_server import SoftwareEngineerMCPServer
-from agents.claude_code_agent import ClaudeCodeAgent
 
 def setup_logging():
     """Setup logging configuration"""
@@ -30,46 +26,10 @@ def setup_logging():
         ]
     )
 
-async def tcp_main():
-    """Main function to start the TCP MCP server"""
-    setup_logging()
-    logger = logging.getLogger(__name__)
-    
-    # Initialize the Claude Code agent
-    try:
-        agent = ClaudeCodeAgent()
-        logger.info("Claude Code agent initialized successfully")
-    except Exception as e:
-        logger.error(f"Failed to initialize Claude Code agent: {e}")
-        sys.exit(1)
-    
-    # Create and start the MCP server
-    port = int(os.getenv('MCP_PORT', 8080))
-    server = SoftwareEngineerMCPServer(agent=agent, port=port)
-    
-    logger.info(f"Starting TCP MCP server on port {port}")
-    logger.info("Server will be accessible at:")
-    logger.info(f"  - Local: http://localhost:{port}")
-    logger.info(f"  - Network: http://0.0.0.0:{port}")
-    logger.info("\nTo connect from ChatGPT app, use the server URL above")
-    logger.info("Press Ctrl+C to stop the server")
-    
-    try:
-        await server.start()
-    except KeyboardInterrupt:
-        logger.info("Server stopped by user")
-    except Exception as e:
-        logger.error(f"Server error: {e}")
-        sys.exit(1)
-
 def main_console():
     """Entry point for vibeteam-mcp console script"""
-    # Check if TCP mode is requested
-    if "--tcp" in sys.argv or os.getenv("MCP_MODE") == "tcp":
-        asyncio.run(tcp_main())
-    else:
-        # Default to stdio mode (standard MCP)
-        stdio_main()
+    # Use the standard MCP protocol (stdio mode)
+    stdio_main()
 
 
 if __name__ == "__main__":
