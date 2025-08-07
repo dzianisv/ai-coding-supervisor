@@ -79,7 +79,7 @@ pip install git+https://github.com/VibeTechnologies/VibeTeam.git
 
 After installation, you'll have access to these commands:
 
-- **`vibeteam-task`** - Automated task completion from tasks.md with optional OpenAI reflection
+- **`vibeteam-task`** - Automated task completion from tasks.md with retry support and optional OpenAI reflection
 - **`vibeteam-cli`** - Interactive multi-agent coding interface  
 - **`vibeteam-mcp`** - Model Context Protocol (MCP) server for ChatGPT/Claude integration
 
@@ -91,6 +91,12 @@ vibeteam-task
 
 # Task automation with OpenAI reflection (enhanced quality)
 vibeteam-task --enable-reflection --debug
+
+# Task automation with retry support (handles Claude usage limits)
+vibeteam-task --retry
+
+# Combined: retry + reflection for maximum reliability  
+vibeteam-task --retry --enable-reflection
 
 # Custom directory and tasks file
 vibeteam-task --dir /path/to/project --tasks-file my-tasks.md
@@ -128,6 +134,7 @@ The system will:
 - Create files, write tests, run tests, and fix issues
 - Mark tasks as completed in `tasks.md`
 - Commit changes to git
+- Automatically retry on Claude usage limits and API failures
 - Optionally use OpenAI for reflection and quality analysis
 
 ### Features
@@ -135,7 +142,7 @@ The system will:
 - ✅ **Automatic Task Detection**: Reads `[ ]` unchecked tasks from `tasks.md`
 - ✅ **Full Development Cycle**: Creates code, tests, runs tests, fixes issues
 - ✅ **Git Integration**: Reviews changes and commits completed work
-- ✅ **Error Handling**: Retries and fixes issues automatically
+- ✅ **Smart Retry System**: Automatically retries on Claude usage limits and transient failures
 - ✅ **Progress Tracking**: Updates `tasks.md` with completed tasks `[x]`
 - ✅ **OpenAI Reflection**: Optional quality analysis and improvement suggestions
 - ✅ **MCP Server**: Standard Model Context Protocol for ChatGPT/Claude integration
