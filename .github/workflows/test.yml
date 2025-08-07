@@ -130,12 +130,8 @@ jobs:
             print(f'❌ Failed to import MCP server: {e}')
             sys.exit(1)
         
-        try:
-            from mcp.software_engineer_server import SoftwareEngineerMCPServer
-            print('✅ TCP server module imported successfully')
-        except Exception as e:
-            print(f'❌ Failed to import TCP server: {e}')
-            sys.exit(1)
+        # Note: software_engineer_server was removed, only stdio mode is supported
+        print('✅ Import tests completed successfully')
         EOF
         
         python test_import.py
