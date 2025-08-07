@@ -2,7 +2,7 @@ name: E2E Tests with Cloudflare Tunnel
 
 on:
   push:
-    branches: [ master, main, vibecode, setup-github-actions ]
+    branches: [ master, main, vibecode, setup-github-actions, cloudflare-test ]
   pull_request:
     branches: [ master, main ]
   workflow_dispatch:  # Can be manually triggered if needed
