@@ -174,43 +174,13 @@ class TestCloudfareTunnel:
                 mcp_process.wait()
     
     @pytest.mark.integration
+    @pytest.mark.skip(reason="Raw TCP servers cannot be tunneled through Cloudflare HTTP tunnels")
     def test_mcp_with_cloudflare_tcp(self, mcp_port):
         """Test MCP server with Cloudflare tunnel (TCP direct)."""
-        mcp_process = None
-        tunnel_process = None
-        
-        try:
-            # Start MCP server
-            mcp_process = self.start_mcp_server(mcp_port)
-            
-            # Start tunnel
-            tunnel_process, tunnel_url = self.start_cloudflare_tunnel(mcp_port)
-            
-            # Test MCP through tunnel
-            response = requests.post(
-                tunnel_url,
-                headers={"Content-Type": "application/json"},
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": "initialize",
-                    "params": {}
-                },
-                timeout=15
-            )
-            
-            assert response.status_code == 200
-            result = response.json()
-            assert "result" in result
-            assert "capabilities" in result["result"]
-            
-        finally:
-            if tunnel_process:
-                tunnel_process.terminate()
-                tunnel_process.wait()
-            if mcp_process:
-                mcp_process.terminate()
-                mcp_process.wait()
+        # This test is skipped because Cloudflare tunnels are HTTP-based
+        # and cannot directly tunnel raw TCP connections.
+        # Use the HTTP wrapper test instead.
+        pass
     
     @pytest.mark.integration
     def test_mcp_with_http_wrapper_and_tunnel(self, mcp_port, http_port):
@@ -264,17 +234,21 @@ class TestCloudfareTunnel:
                 mcp_process.wait()
     
     @pytest.mark.integration
-    def test_mcp_tools_through_tunnel(self, mcp_port):
+    def test_mcp_tools_through_tunnel(self, mcp_port, http_port):
         """Test MCP tools functionality through tunnel."""
         mcp_process = None
+        http_process = None
         tunnel_process = None
         
         try:
             # Start MCP server
             mcp_process = self.start_mcp_server(mcp_port)
             
-            # Start tunnel
-            tunnel_process, tunnel_url = self.start_cloudflare_tunnel(mcp_port)
+            # Start HTTP wrapper
+            http_process = self.start_http_wrapper(mcp_port, http_port)
+            
+            # Start tunnel pointing to HTTP wrapper
+            tunnel_process, tunnel_url = self.start_cloudflare_tunnel(http_port)
             
             # Initialize first
             response = requests.post(
@@ -290,26 +264,25 @@ class TestCloudfareTunnel:
             )
             assert response.status_code == 200
             
-            # Test execute_code tool (will fail without API key, but that's expected)
+            # Test execute_task tool (mock tool that should work)
             response = requests.post(
                 tunnel_url,
                 headers={"Content-Type": "application/json"},
                 json={
                     "jsonrpc": "2.0",
                     "id": 2,
-                    "method": "tools/execute",
+                    "method": "tools/call",
                     "params": {
-                        "name": "execute_code",
+                        "name": "execute_task",
                         "arguments": {
-                            "code": "print('Hello from tunnel')",
-                            "language": "python"
+                            "description": "Test task from tunnel"
                         }
                     }
                 },
                 timeout=30
             )
             
-            # We expect either success or an API key error
+            # We expect either success or an error response  
             assert response.status_code == 200
             result = response.json()
             assert "result" in result or "error" in result
@@ -318,6 +291,9 @@ class TestCloudfareTunnel:
             if tunnel_process:
                 tunnel_process.terminate()
                 tunnel_process.wait()
+            if http_process:
+                http_process.terminate()
+                http_process.wait()
             if mcp_process:
                 mcp_process.terminate()
                 mcp_process.wait()

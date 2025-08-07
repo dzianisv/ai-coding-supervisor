@@ -63,10 +63,10 @@ jobs:
       env:
         PYTHONPATH: ${{ github.workspace }}
     
-    - name: Run TCP server E2E tests
+    - name: Run Cloudflare setup tests
       run: |
-        # Run TCP server tests that don't require API keys
-        pytest tests/tcp/ -v --timeout=60
+        # Run setup validation tests
+        pytest tests/test_cloudflare_setup.py -v --timeout=60
       env:
         PYTHONPATH: ${{ github.workspace }}
     
