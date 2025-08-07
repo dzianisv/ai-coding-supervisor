@@ -1,11 +1,12 @@
 name: Build & Push Docker Image
 
 on:
-  push:
-    branches: [main, master]
-  pull_request:
-    branches: [main, master]
-  workflow_dispatch:
+  # Temporarily disabled - Docker functionality not tested yet
+  # push:
+  #   branches: [main, master]
+  # pull_request:
+  #   branches: [main, master]
+  workflow_dispatch:  # Can be manually triggered if needed
 
 jobs:
   build-and-push:
