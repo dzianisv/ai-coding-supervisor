@@ -36,7 +36,7 @@ class TestCloudfareTunnel:
         env["MCP_MODE"] = "tcp"
         
         process = subprocess.Popen(
-            [sys.executable, '-m', 'run_mcp_server'],
+            [sys.executable, 'tests/mcp/test_mcp_server.py'],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,

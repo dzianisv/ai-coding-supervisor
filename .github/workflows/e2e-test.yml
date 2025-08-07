@@ -1,11 +1,10 @@
 name: E2E Tests with Cloudflare Tunnel
 
 on:
-  # Temporarily disabled - E2E functionality needs fixes
-  # push:
-  #   branches: [ master, main, vibecode, setup-github-actions ]
-  # pull_request:
-  #   branches: [ master, main ]
+  push:
+    branches: [ master, main, vibecode, setup-github-actions ]
+  pull_request:
+    branches: [ master, main ]
   workflow_dispatch:  # Can be manually triggered if needed
 
 jobs:
