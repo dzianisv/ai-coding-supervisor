@@ -5,10 +5,15 @@ This server provides access to VibeTeam's AI agents (Claude Code Agent and
 Engineering Manager) through the MCP protocol, allowing integration with
 various AI assistants and tools.
 """
+import argparse
 import asyncio
 import logging
 import os
+import re
+import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 from typing import Any, Dict, Optional, List
 
@@ -24,25 +29,130 @@ from agents.engineering_manager import EngineeringManager
 logger = logging.getLogger(__name__)
 
 
+class CloudflareTunnel:
+    """Manages Cloudflare tunnel for MCP server."""
+    
+    def __init__(self, port: int = 8080):
+        """Initialize tunnel manager.
+        
+        Args:
+            port: Local port to tunnel
+        """
+        self.port = port
+        self.process = None
+        self.tunnel_url = None
+        self.logger = logging.getLogger(f"{__name__}.CloudflareTunnel")
+    
+    def find_cloudflared(self) -> Optional[str]:
+        """Find cloudflared binary in common locations."""
+        cloudflared_paths = [
+            "./cloudflared",
+            "/usr/local/bin/cloudflared", 
+            "/opt/homebrew/bin/cloudflared",
+            "cloudflared"  # In PATH
+        ]
+        
+        for path in cloudflared_paths:
+            try:
+                result = subprocess.run([path, "--version"], capture_output=True)
+                if result.returncode == 0:
+                    return path
+            except:
+                continue
+        return None
+    
+    def start(self) -> Optional[str]:
+        """Start Cloudflare tunnel and return the URL.
+        
+        Returns:
+            Public tunnel URL if successful, None otherwise
+        """
+        cloudflared_path = self.find_cloudflared()
+        if not cloudflared_path:
+            self.logger.error("cloudflared binary not found. Install it from https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/installation/")
+            return None
+        
+        self.logger.info(f"Starting Cloudflare tunnel for port {self.port}...")
+        
+        self.process = subprocess.Popen(
+            [cloudflared_path, 'tunnel', '--url', f'http://localhost:{self.port}'],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1
+        )
+        
+        # Wait for tunnel URL in a separate thread
+        def get_tunnel_url():
+            start_time = time.time()
+            while time.time() - start_time < 30:
+                if self.process.poll() is not None:
+                    self.logger.error("Cloudflare tunnel process exited unexpectedly")
+                    return
+                
+                line = self.process.stderr.readline()
+                if line and 'trycloudflare.com' in line:
+                    match = re.search(r'https://[\w\-]+\.trycloudflare\.com', line)
+                    if match:
+                        self.tunnel_url = match.group(0)
+                        self.logger.info(f"🌐 Cloudflare tunnel active: {self.tunnel_url}")
+                        return
+            
+            self.logger.error("Failed to get tunnel URL within 30 seconds")
+        
+        tunnel_thread = threading.Thread(target=get_tunnel_url)
+        tunnel_thread.daemon = True
+        tunnel_thread.start()
+        tunnel_thread.join(timeout=35)
+        
+        return self.tunnel_url
+    
+    def stop(self):
+        """Stop the Cloudflare tunnel."""
+        if self.process:
+            self.logger.info("Stopping Cloudflare tunnel...")
+            self.process.terminate()
+            try:
+                self.process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+            self.process = None
+            self.tunnel_url = None
+
+
 class VibeTeamMCPServer:
     """VibeTeam MCP Server implementation."""
     
-    def __init__(self, working_directory: Optional[str] = None):
+    def __init__(self, working_directory: Optional[str] = None, tunnel_mode: bool = False, http_port: int = 8080):
         """Initialize the VibeTeam MCP server.
         
         Args:
             working_directory: Working directory for agents (defaults to current)
+            tunnel_mode: Enable Cloudflare tunnel mode
+            http_port: Port for HTTP server when in tunnel mode
         """
         self.working_directory = working_directory or os.getcwd()
-        self.server = StdioMCPServer(name="vibeteam", version="1.0.0")
+        self.tunnel_mode = tunnel_mode
+        self.http_port = http_port
+        self.tunnel = None
+        self.http_server_process = None
+        
+        if tunnel_mode:
+            # In tunnel mode, we need HTTP server + tunnel
+            self.server = None  # Will create HTTP server instead
+            self.tunnel = CloudflareTunnel(port=http_port)
+        else:
+            # Standard stdio mode
+            self.server = StdioMCPServer(name="vibeteam", version="1.0.0")
+        
         self.claude_agent = None
         self.eng_manager = None
         
-        # Register tools
-        self._register_tools()
-        
-        # Register resources
-        self._register_resources()
+        if not tunnel_mode:
+            # Register tools for stdio mode
+            self._register_tools()
+            # Register resources
+            self._register_resources()
         
     def _register_tools(self) -> None:
         """Register all available tools."""
@@ -624,28 +734,257 @@ class VibeTeamMCPServer:
             
         return "\n".join(status)
         
+    def _start_http_server(self) -> None:
+        """Start HTTP server for tunnel mode."""
+        from flask import Flask, request, jsonify
+        import json
+        
+        app = Flask(__name__)
+        
+        @app.route('/', methods=['POST'])
+        def handle_mcp_request():
+            """Handle MCP requests over HTTP."""
+            try:
+                data = request.get_json()
+                if not data:
+                    return jsonify({"error": "No JSON data provided"}), 400
+                
+                # Process MCP request directly
+                response = self._process_mcp_request(data)
+                return jsonify(response)
+                
+            except Exception as e:
+                logger.error(f"Error processing HTTP request: {e}")
+                return jsonify({"error": str(e)}), 500
+        
+        @app.route('/health', methods=['GET'])
+        def health_check():
+            """Health check endpoint."""
+            return jsonify({"status": "healthy", "service": "vibeteam-mcp"})
+        
+        # Start server in background thread
+        def run_http_server():
+            app.run(host='0.0.0.0', port=self.http_port, debug=False, threaded=True)
+        
+        import threading
+        server_thread = threading.Thread(target=run_http_server)
+        server_thread.daemon = True
+        server_thread.start()
+        
+        logger.info(f"HTTP server started on port {self.http_port}")
+    
+    def _process_mcp_request(self, data: Dict) -> Dict:
+        """Process MCP request directly without stdio server."""
+        try:
+            method = data.get('method')
+            message_id = data.get('id')
+            params = data.get('params', {})
+            
+            if method == 'initialize':
+                return {
+                    "jsonrpc": "2.0",
+                    "id": message_id,
+                    "result": {
+                        "protocolVersion": "2025-01-21",
+                        "capabilities": {
+                            "tools": {"listChanged": True},
+                            "resources": {"listChanged": True}
+                        },
+                        "serverInfo": {
+                            "name": "vibeteam",
+                            "version": "1.0.0"
+                        }
+                    }
+                }
+            
+            elif method == 'tools/list':
+                tools = [
+                    {
+                        "name": "execute_task",
+                        "description": "Execute a coding task using Claude Code Agent",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "description": {"type": "string", "description": "Task description"}
+                            },
+                            "required": ["description"]
+                        }
+                    },
+                    {
+                        "name": "review_code", 
+                        "description": "Review code for quality and improvements",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "code": {"type": "string", "description": "Code to review"},
+                                "language": {"type": "string", "description": "Programming language"}
+                            },
+                            "required": ["code"]
+                        }
+                    }
+                ]
+                
+                return {
+                    "jsonrpc": "2.0",
+                    "id": message_id,
+                    "result": {"tools": tools}
+                }
+            
+            elif method == 'tools/call':
+                tool_name = params.get('name')
+                arguments = params.get('arguments', {})
+                
+                # Execute tool
+                if tool_name == 'execute_task':
+                    result = self._execute_task_sync(arguments.get('description', ''))
+                elif tool_name == 'review_code':
+                    result = self._review_code_sync(arguments.get('code', ''), arguments.get('language', 'python'))
+                else:
+                    raise ValueError(f"Unknown tool: {tool_name}")
+                
+                return {
+                    "jsonrpc": "2.0",
+                    "id": message_id,
+                    "result": {
+                        "status": "completed",
+                        "output": result
+                    }
+                }
+            
+            else:
+                raise ValueError(f"Unknown method: {method}")
+                
+        except Exception as e:
+            return {
+                "jsonrpc": "2.0",
+                "id": data.get('id'),
+                "error": {
+                    "code": -32603,
+                    "message": str(e)
+                }
+            }
+    
+    def _execute_task_sync(self, description: str) -> str:
+        """Execute task synchronously for HTTP mode."""
+        # Initialize agent if needed
+        if not self.claude_agent:
+            self.claude_agent = ClaudeCodeAgent(
+                working_directory=self.working_directory,
+                permission_mode="bypassPermissions"
+            )
+        
+        # Run async task in sync context
+        import asyncio
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        
+        try:
+            result = loop.run_until_complete(
+                self.claude_agent.execute_task({"description": description})
+            )
+            return str(result)
+        except Exception as e:
+            return f"Task execution failed: {str(e)}"
+    
+    def _review_code_sync(self, code: str, language: str) -> str:
+        """Review code synchronously for HTTP mode.""" 
+        # Initialize agent if needed
+        if not self.claude_agent:
+            self.claude_agent = ClaudeCodeAgent(
+                working_directory=self.working_directory,
+                permission_mode="bypassPermissions"
+            )
+        
+        # Run async task in sync context
+        import asyncio
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        
+        try:
+            result = loop.run_until_complete(
+                self.claude_agent.review_work({"code": code, "language": language})
+            )
+            return str(result)
+        except Exception as e:
+            return f"Code review failed: {str(e)}"
+
     async def run(self) -> None:
         """Run the MCP server."""
+        if self.tunnel_mode:
+            await self.run_tunnel_mode()
+        else:
+            try:
+                await self.server.start()
+            except KeyboardInterrupt:
+                logger.info("Server interrupted by user")
+            except Exception as e:
+                logger.error(f"Server error: {e}", exc_info=True)
+                raise
+            finally:
+                await self.server.stop()
+    
+    async def run_tunnel_mode(self) -> None:
+        """Run server in tunnel mode with HTTP server and Cloudflare tunnel."""
         try:
-            await self.server.start()
-        except KeyboardInterrupt:
-            logger.info("Server interrupted by user")
+            # Start HTTP server
+            logger.info("🚀 Starting VibeTeam MCP server in tunnel mode...")
+            self._start_http_server()
+            
+            # Wait for HTTP server to be ready
+            import time
+            time.sleep(2)
+            
+            # Start Cloudflare tunnel
+            tunnel_url = self.tunnel.start()
+            if tunnel_url:
+                logger.info(f"🌍 VibeTeam MCP server is publicly accessible at: {tunnel_url}")
+                logger.info("📋 Use this URL in your MCP client configuration")
+            else:
+                logger.warning("⚠️ Cloudflare tunnel failed to start, server only available locally")
+                logger.info(f"🏠 Local server running at: http://localhost:{self.http_port}")
+            
+            # Keep server running
+            try:
+                while True:
+                    await asyncio.sleep(1)
+            except KeyboardInterrupt:
+                logger.info("Server interrupted by user")
+                
         except Exception as e:
-            logger.error(f"Server error: {e}", exc_info=True)
+            logger.error(f"Tunnel mode error: {e}", exc_info=True)
             raise
         finally:
-            await self.server.stop()
+            if self.tunnel:
+                self.tunnel.stop()
             
     def run_sync(self) -> None:
         """Run the MCP server in synchronous mode (better for subprocesses)."""
-        sync_server = SyncStdioMCPServer(self.server)
-        try:
-            sync_server.start()
-        except KeyboardInterrupt:
-            logger.info("Server interrupted by user")
-        except Exception as e:
-            logger.error(f"Server error: {e}", exc_info=True)
-            raise
+        if self.tunnel_mode:
+            # For tunnel mode, run in async context
+            import asyncio
+            try:
+                asyncio.run(self.run_tunnel_mode())
+            except KeyboardInterrupt:
+                logger.info("Server interrupted by user")
+            except Exception as e:
+                logger.error(f"Server error: {e}", exc_info=True)
+                raise
+        else:
+            # Standard stdio mode
+            sync_server = SyncStdioMCPServer(self.server)
+            try:
+                sync_server.start()
+            except KeyboardInterrupt:
+                logger.info("Server interrupted by user")
+            except Exception as e:
+                logger.error(f"Server error: {e}", exc_info=True)
+                raise
 
 
 async def main():
@@ -670,22 +1009,87 @@ async def main():
 
 def main_console():
     """Console entry point for vibeteam-mcp command."""
-    # Use synchronous mode for better subprocess compatibility
-    # Setup logging
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.FileHandler('vibeteam-mcp.log'),
-            logging.StreamHandler() if os.getenv('MCP_DEBUG') else logging.NullHandler()
-        ]
+    parser = argparse.ArgumentParser(
+        description="VibeTeam MCP Server - AI coding agents via Model Context Protocol",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  vibeteam-mcp                        # Default: Cloudflare tunnel mode
+  vibeteam-mcp --no-tunnel            # Standard MCP protocol (stdio)
+  vibeteam-mcp --port 9000            # Custom HTTP port with tunnel
+  vibeteam-mcp --dir /path/to/project # Custom working directory
+
+Default tunnel mode automatically:
+- Starts HTTP server on specified port (default: 8080)
+- Launches Cloudflare tunnel for public access
+- Provides public URL for MCP client integration
+
+Use --no-tunnel for stdio protocol for direct local integration.
+        """
+    )
+    parser.add_argument(
+        "--no-tunnel",
+        action="store_true",
+        help="Disable Cloudflare tunnel mode (use stdio protocol instead)"
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8080,
+        metavar="PORT",
+        help="HTTP port for tunnel mode (default: 8080)"
+    )
+    parser.add_argument(
+        "--dir", "-d",
+        metavar="PATH",
+        help="Working directory (default: current directory)"
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable debug logging to console"
+    )
+    parser.add_argument(
+        "--version", "-v",
+        action="version",
+        version="vibeteam-mcp 1.0.0"
     )
     
-    # Get working directory from environment or use current
-    working_dir = os.getenv('VIBETEAM_WORKING_DIR', os.getcwd())
+    args = parser.parse_args()
     
-    # Create and run server in sync mode
-    server = VibeTeamMCPServer(working_directory=working_dir)
+    # Setup logging
+    log_level = logging.DEBUG if args.debug else logging.INFO
+    handlers = [logging.FileHandler('vibeteam-mcp.log')]
+    
+    if args.debug or os.getenv('MCP_DEBUG'):
+        handlers.append(logging.StreamHandler())
+    else:
+        handlers.append(logging.NullHandler())
+    
+    logging.basicConfig(
+        level=log_level,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=handlers
+    )
+    
+    # Get working directory from args or environment or use current
+    working_dir = args.dir or os.getenv('VIBETEAM_WORKING_DIR', os.getcwd())
+    
+    # Create and run server (tunnel mode is now default)
+    if args.no_tunnel:
+        logger.info("📡 Starting VibeTeam MCP server in standard mode (stdio)")
+        logger.info(f"📁 Working directory: {working_dir}")
+        server = VibeTeamMCPServer(working_directory=working_dir)
+    else:
+        logger.info(f"🌐 Starting VibeTeam MCP server in tunnel mode (default)")
+        logger.info(f"📁 Working directory: {working_dir}")
+        logger.info(f"🔌 HTTP port: {args.port}")
+        server = VibeTeamMCPServer(
+            working_directory=working_dir,
+            tunnel_mode=True,
+            http_port=args.port
+        )
+    
     server.run_sync()
 
 
