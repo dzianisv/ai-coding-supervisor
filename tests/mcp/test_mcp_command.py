@@ -23,7 +23,7 @@ class TestMCPCommand:
         """Test that vibeteam-mcp command is available."""
         # Try running with Python module syntax
         result = subprocess.run(
-            [sys.executable, "-m", "run_mcp_server", "--help"],
+            [sys.executable, "-m", "mcp.vibeteam_mcp_server", "--help"],
             capture_output=True,
             text=True,
             cwd=str(project_root)
@@ -37,7 +37,7 @@ class TestMCPCommand:
         """Test MCP server responds to stdio protocol."""
         # Start the MCP server process
         process = subprocess.Popen(
-            [sys.executable, "-m", "run_mcp_server"],
+            [sys.executable, "-m", "mcp.vibeteam_mcp_server", "--no-tunnel"],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -103,7 +103,7 @@ class TestMCPCommand:
         """Test that TCP mode can be started."""
         # Start server in TCP mode
         process = subprocess.Popen(
-            [sys.executable, "-m", "run_mcp_server", "--tcp"],
+            [sys.executable, "-m", "mcp.vibeteam_mcp_server", "--no-tunnel"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -140,7 +140,7 @@ class TestMCPServerScenarios:
         """Test a code review scenario through MCP."""
         # Start the MCP server process
         process = subprocess.Popen(
-            [sys.executable, "-m", "run_mcp_server"],
+            [sys.executable, "-m", "mcp.vibeteam_mcp_server", "--no-tunnel"],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -198,7 +198,7 @@ class TestMCPServerScenarios:
         
         # Start the MCP server process
         process = subprocess.Popen(
-            [sys.executable, "-m", "run_mcp_server"],
+            [sys.executable, "-m", "mcp.vibeteam_mcp_server", "--no-tunnel"],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,

@@ -204,7 +204,7 @@ vibeteam-mcp --port 9000
 vibeteam-mcp --no-tunnel
 ```
 
-See [DEPLOYMENT.md](./DEPLOYMENT.md) for detailed deployment instructions.
+The integrated tunnel approach eliminates the need for manual deployment scripts. For advanced deployment scenarios, see [DEPLOYMENT.md](./DEPLOYMENT.md).
 
 ## 🛠 Usage
 
