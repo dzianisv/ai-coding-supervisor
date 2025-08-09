@@ -2,7 +2,7 @@ name: E2E Tests with Cloudflare Tunnel
 
 on:
   push:
-    branches: [ master, main, vibecode, setup-github-actions, cloudflare-test ]
+    branches: [ master, main, vibecode, setup-github-actions, cloudflare-test, feat-mcp-tunnel-default ]
   pull_request:
     branches: [ master, main ]
   workflow_dispatch:  # Can be manually triggered if needed
@@ -53,6 +53,13 @@ jobs:
       run: |
         # First run minimal test to verify cloudflared works
         pytest tests/tunnel/test_minimal_tunnel.py -v --timeout=120
+      env:
+        PYTHONPATH: ${{ github.workspace }}
+    
+    - name: Run integrated tunnel tests
+      run: |
+        # Test the new integrated vibeteam-mcp tunnel functionality
+        pytest tests/tunnel/test_integrated_tunnel.py -v --timeout=180
       env:
         PYTHONPATH: ${{ github.workspace }}
     

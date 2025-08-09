@@ -1,5 +1,7 @@
 # Cloudflare Tunnel for MCP Server
 
+**Note**: These scripts provide advanced tunnel configuration. For simple usage, `vibeteam-mcp` now includes integrated tunnel support - just run `vibeteam-mcp` and it automatically creates a tunnel.
+
 This directory contains scripts to set up a secure Cloudflare Tunnel for your MCP Server, providing:
 
 - Free HTTPS with automatic Let's Encrypt certificates

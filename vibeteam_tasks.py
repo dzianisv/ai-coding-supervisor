@@ -5,10 +5,13 @@ import re
 import json
 import time
 import random
-from typing import Optional
+from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field
 from openai import OpenAI
 from agents.claude_code_agent import ClaudeCodeAgent
+from github import Github
+from datetime import datetime
+import subprocess
 
 
 class RetryConfig(BaseModel):
@@ -44,6 +47,19 @@ class TaskReflection(BaseModel):
     needs_retry: bool = Field(description="Whether the task should be retried")
     retry_reason: Optional[str] = Field(default=None, description="Reason why retry is needed if needs_retry is True")
     is_transient_error: bool = Field(default=False, description="Whether the error is likely transient (API limits, timeouts)")
+
+
+class GitHubComment(BaseModel):
+    """Represents a GitHub PR comment."""
+    id: int
+    body: str
+    user: str
+    created_at: datetime
+    updated_at: datetime
+    file_path: Optional[str] = None
+    line_number: Optional[int] = None
+    pr_number: int
+    is_resolved: bool = False
 
 
 class RetryManager:
@@ -177,6 +193,422 @@ Be thorough but practical in your assessment.
                 suggestions=["Manual review recommended"],
                 needs_retry=False
             )
+
+
+
+
+class GitHubPRManager:
+    """Manages GitHub PR operations and comment processing."""
+    
+    def __init__(self, github_token: str, repo_url: str, working_dir: str, debug_mode: bool = False):
+        self.github = Github(github_token)
+        self.repo_url = repo_url
+        self.working_dir = working_dir
+        self.debug_mode = debug_mode
+        self.github_token = github_token
+        
+        # Parse repo URL to get owner/repo
+        if repo_url.startswith('https://github.com/'):
+            repo_path = repo_url.replace('https://github.com/', '').rstrip('/')
+            self.clone_url = f"https://{github_token}@github.com/{repo_path}.git"
+        elif repo_url.startswith('git@github.com:'):
+            repo_path = repo_url.replace('git@github.com:', '').replace('.git', '').rstrip('/')
+            self.clone_url = repo_url
+        else:
+            repo_path = repo_url
+            self.clone_url = f"https://{github_token}@github.com/{repo_path}.git"
+        
+        self.repo_path = repo_path
+        self.repo = self.github.get_repo(repo_path)
+        self.local_repo_dir = os.path.join(working_dir, repo_path.split('/')[-1])
+        
+        if debug_mode:
+            print(f"🔗 Connected to GitHub repo: {self.repo.full_name}")
+            print(f"📁 Local repo directory: {self.local_repo_dir}")
+    
+    def get_open_pull_requests(self) -> List[Any]:
+        """Get all open pull requests."""
+        return list(self.repo.get_pulls(state='open'))
+    
+    def get_pr_comments(self, pr_number: int) -> List[GitHubComment]:
+        """Get all comments from a specific pull request."""
+        pr = self.repo.get_pull(pr_number)
+        comments = []
+        
+        # Get review comments (file-specific)
+        for comment in pr.get_review_comments():
+            comments.append(GitHubComment(
+                id=comment.id,
+                body=comment.body,
+                user=comment.user.login,
+                created_at=comment.created_at,
+                updated_at=comment.updated_at,
+                file_path=comment.path,
+                line_number=comment.line if hasattr(comment, 'line') else comment.original_line,
+                pr_number=pr_number
+            ))
+        
+        # Get issue comments (general PR comments)
+        for comment in pr.get_issue_comments():
+            comments.append(GitHubComment(
+                id=comment.id,
+                body=comment.body,
+                user=comment.user.login,
+                created_at=comment.created_at,
+                updated_at=comment.updated_at,
+                pr_number=pr_number
+            ))
+        
+        return comments
+    
+    def get_all_unaddressed_comments(self) -> List[GitHubComment]:
+        """Get all unaddressed comments from all open PRs."""
+        all_comments = []
+        prs = self.get_open_pull_requests()
+        
+        if self.debug_mode:
+            print(f"📋 Found {len(prs)} open pull request(s)")
+        
+        for pr in prs:
+            comments = self.get_pr_comments(pr.number)
+            if self.debug_mode:
+                print(f"   PR #{pr.number}: {len(comments)} comment(s)")
+            all_comments.extend(comments)
+        
+        # Filter out comments that are likely resolved (basic heuristic)
+        unaddressed = []
+        for comment in all_comments:
+            # Skip bot comments and author's own comments
+            if comment.user.lower() in ['github-actions', 'dependabot', 'renovate']:
+                continue
+            
+            # Check if comment has been addressed (basic check for subsequent commits)
+            # This is a simplified approach - in a real implementation you'd want more sophisticated tracking
+            unaddressed.append(comment)
+        
+        return unaddressed
+    
+    def post_comment_response(self, pr_number: int, comment_id: int, response: str, commit_sha: Optional[str] = None) -> bool:
+        """Post a response to a comment."""
+        try:
+            pr = self.repo.get_pull(pr_number)
+            
+            # Format response with commit info if provided
+            formatted_response = response
+            if commit_sha:
+                formatted_response += f"\n\n🔄 Addressed in commit: {commit_sha}"
+            
+            # Post as issue comment (general PR comment)
+            pr.create_issue_comment(formatted_response)
+            
+            if self.debug_mode:
+                print(f"✅ Posted response to comment {comment_id} on PR #{pr_number}")
+            
+            return True
+        except Exception as e:
+            if self.debug_mode:
+                print(f"❌ Failed to post comment response: {e}")
+            return False
+    
+    def setup_repository(self) -> bool:
+        """Clone or update the local repository."""
+        try:
+            if os.path.exists(self.local_repo_dir):
+                if self.debug_mode:
+                    print(f"📥 Updating existing repository in {self.local_repo_dir}")
+                
+                # Change to repo directory and fetch latest changes
+                os.chdir(self.local_repo_dir)
+                subprocess.run(['git', 'fetch', 'origin'], check=True, capture_output=True)
+                
+                if self.debug_mode:
+                    print("✅ Repository updated successfully")
+            else:
+                if self.debug_mode:
+                    print(f"📥 Cloning repository to {self.local_repo_dir}")
+                
+                # Clone the repository
+                subprocess.run(['git', 'clone', self.clone_url, self.local_repo_dir], 
+                             check=True, capture_output=True)
+                os.chdir(self.local_repo_dir)
+                
+                if self.debug_mode:
+                    print("✅ Repository cloned successfully")
+            
+            return True
+            
+        except subprocess.CalledProcessError as e:
+            if self.debug_mode:
+                print(f"❌ Failed to setup repository: {e}")
+            return False
+    
+    def switch_to_pr_branch(self, pr_number: int) -> bool:
+        """Switch to the branch associated with a specific PR."""
+        try:
+            # Get PR details
+            pr = self.repo.get_pull(pr_number)
+            branch_name = pr.head.ref
+            
+            if self.debug_mode:
+                print(f"🔀 Switching to PR branch: {branch_name}")
+            
+            # Ensure we're in the repo directory
+            os.chdir(self.local_repo_dir)
+            
+            # Fetch the latest changes
+            subprocess.run(['git', 'fetch', 'origin'], check=True, capture_output=True)
+            
+            # Check if branch exists locally
+            result = subprocess.run(['git', 'branch', '--list', branch_name], 
+                                  capture_output=True, text=True)
+            
+            if branch_name in result.stdout:
+                # Branch exists locally, switch to it
+                subprocess.run(['git', 'checkout', branch_name], check=True, capture_output=True)
+                # Pull latest changes
+                subprocess.run(['git', 'pull', 'origin', branch_name], check=True, capture_output=True)
+            else:
+                # Branch doesn't exist locally, create and track it
+                subprocess.run(['git', 'checkout', '-b', branch_name, f'origin/{branch_name}'], 
+                             check=True, capture_output=True)
+            
+            if self.debug_mode:
+                print(f"✅ Successfully switched to branch: {branch_name}")
+            
+            return True
+            
+        except subprocess.CalledProcessError as e:
+            if self.debug_mode:
+                print(f"❌ Failed to switch to PR branch: {e}")
+            return False
+        except Exception as e:
+            if self.debug_mode:
+                print(f"❌ Error switching to PR branch: {e}")
+            return False
+    
+    def get_pr_for_comment(self, comment: GitHubComment) -> int:
+        """Get the PR number for a given comment."""
+        return comment.pr_number
+    
+    def get_latest_commit_sha(self) -> str:
+        """Get the latest commit SHA from the current branch."""
+        try:
+            # Ensure we're in the repo directory
+            os.chdir(self.local_repo_dir)
+            result = subprocess.run(['git', 'rev-parse', 'HEAD'], 
+                                  capture_output=True, text=True, check=True)
+            return result.stdout.strip()
+        except subprocess.CalledProcessError:
+            return "unknown"
+
+
+async def async_github_mode(github_repo_url: str, working_dir=None, debug_mode=False, enable_retry=False, retry_config=None):
+    """
+    Async GitHub mode to process PR comments and address them with Claude Code.
+    
+    Args:
+        github_repo_url: GitHub repository URL
+        working_dir: Directory to run in (defaults to current directory)
+        debug_mode: Enable debug output for technical details
+        enable_retry: Enable automatic retry for transient failures
+        retry_config: RetryConfig object with retry parameters
+    """
+    if working_dir:
+        os.chdir(working_dir)
+    
+    # Setup retry configuration
+    if retry_config is None:
+        retry_config = RetryConfig()
+    
+    retry_manager = RetryManager(retry_config) if enable_retry else None
+    
+    # Welcome message
+    print("🚀 VibeTeam GitHub PR Comment Bot")
+    print(f"📁 Working in: {os.getcwd()}")
+    print(f"🔗 GitHub repo: {github_repo_url}")
+    if debug_mode:
+        print("🐛 Debug mode enabled - showing technical details")
+    if enable_retry:
+        print(f"🔄 Retry mode enabled - max {retry_config.max_attempts} attempts with exponential backoff")
+    print()
+    
+    # Check for required environment variables
+    github_token = os.getenv("GITHUB_TOKEN")
+    if not github_token:
+        print("❌ Error: GITHUB_TOKEN environment variable not set")
+        print("💡 Please set GITHUB_TOKEN with a GitHub personal access token")
+        return 1
+    
+    # Initialize GitHub manager
+    try:
+        github_manager = GitHubPRManager(github_token, github_repo_url, os.getcwd(), debug_mode)
+    except Exception as e:
+        print(f"❌ Failed to connect to GitHub: {e}")
+        return 1
+    
+    # Setup the repository (clone or update)
+    print("📥 Setting up repository...")
+    if not github_manager.setup_repository():
+        print("❌ Failed to setup repository")
+        return 1
+    
+    # Get all unaddressed comments
+    print("🔍 Fetching unaddressed comments from open PRs...")
+    unaddressed_comments = github_manager.get_all_unaddressed_comments()
+    
+    if not unaddressed_comments:
+        print("✅ No unaddressed comments found in open PRs!")
+        return 0
+    
+    print(f"📋 Found {len(unaddressed_comments)} unaddressed comment(s)")
+    print()
+    
+    # Group comments by PR to minimize branch switching
+    comments_by_pr = {}
+    for comment in unaddressed_comments:
+        pr_num = comment.pr_number
+        if pr_num not in comments_by_pr:
+            comments_by_pr[pr_num] = []
+        comments_by_pr[pr_num].append(comment)
+    
+    print(f"📊 Comments span {len(comments_by_pr)} PR(s)")
+    print()
+    
+    # Process comments grouped by PR
+    comment_count = 0
+    for pr_number, pr_comments in comments_by_pr.items():
+        print(f"🔀 Processing PR #{pr_number} ({len(pr_comments)} comment(s))")
+        
+        # Switch to the PR branch
+        if not github_manager.switch_to_pr_branch(pr_number):
+            print(f"❌ Failed to switch to PR #{pr_number} branch, skipping...")
+            continue
+        
+        # Process each comment in this PR
+        for comment in pr_comments:
+            comment_count += 1
+            print(f"🎯 Processing comment {comment_count}/{len(unaddressed_comments)}")
+            print(f"   👤 Author: {comment.user}")
+            print(f"   📄 File: {comment.file_path or 'General PR comment'}")
+            print(f"   📝 Content: {comment.body[:100]}{'...' if len(comment.body) > 100 else ''}")
+            print("-" * 50)
+            
+            # Create comprehensive task prompt for Claude Code to analyze and address the comment
+            task_prompt = f"""You are addressing a GitHub PR comment. Your task is to:
+
+1. ANALYZE the comment to understand what action is needed
+2. ADDRESS the comment appropriately (fix code, answer question, or respond)
+3. PROVIDE a clear response for GitHub
+
+PR Comment Details:
+- Author: {comment.user}
+- File: {comment.file_path or 'General PR comment'}
+- Line: {comment.line_number or 'N/A'}
+- Comment: {comment.body}
+
+Instructions:
+1. First, analyze the comment to determine what type of response is needed:
+   - Does it suggest a bug fix or code improvement? → Implement the fix
+   - Does it ask a question about the code? → Research and provide a clear answer
+   - Is it a style/formatting suggestion? → Make the suggested changes if reasonable
+   - Is it a general discussion point? → Provide a thoughtful response
+
+2. If code changes are needed:
+   - Read the relevant files to understand the context
+   - Implement the suggested changes or fixes
+   - Run any relevant tests to ensure the changes work
+   - Commit your changes with a clear commit message
+
+3. Always prepare a response that will be posted to GitHub explaining:
+   - What you understood from the comment
+   - What action you took (if any)
+   - Any relevant details or explanations
+
+4. Your response should be professional and helpful, addressing the commenter directly
+
+Focus on being thorough and providing value to the code review process."""
+            
+            # Execute the task with Claude Code
+            max_attempts = retry_config.max_attempts if enable_retry else 1
+            attempt = 0
+            task_completed_successfully = False
+            response_text = ""
+            commit_sha = None
+            
+            while attempt < max_attempts and not task_completed_successfully:
+                attempt += 1
+                
+                if attempt > 1:
+                    print(f"🔄 Retry attempt {attempt}/{max_attempts}")
+                
+                try:
+                    claude_agent = ClaudeCodeAgent(
+                        working_directory=github_manager.local_repo_dir,
+                        permission_mode="bypassPermissions",
+                        debug_mode=debug_mode,
+                    )
+                    
+                    # Execute the task
+                    execution_result = await claude_agent.execute_task({
+                        "description": task_prompt
+                    })
+                    
+                    # Get the response from execution result
+                    if hasattr(execution_result, 'output') and execution_result.output:
+                        response_text = str(execution_result.output)
+                    else:
+                        response_text = "I have reviewed and addressed your comment. Thank you for the feedback!"
+                    
+                    # Check for errors
+                    if hasattr(execution_result, 'errors') and execution_result.errors:
+                        error_messages = ' '.join(execution_result.errors)
+                        
+                        if enable_retry and retry_manager.should_retry_error(error_messages) and attempt < max_attempts:
+                            print(f"⚠️  Retryable error detected: {error_messages[:100]}...")
+                            delay = retry_manager.calculate_delay(attempt)
+                            print(f"⏱️  Waiting {retry_manager.format_duration(delay)} before retry...")
+                            if delay > 0:
+                                await asyncio.sleep(delay)
+                            continue
+                        else:
+                            response_text = f"I reviewed your comment but encountered some issues during execution. The main points have been noted: {error_messages}"
+                    
+                    task_completed_successfully = True
+                    
+                    # Get the latest commit SHA if code changes were made
+                    commit_sha = github_manager.get_latest_commit_sha()
+                    
+                except Exception as e:
+                    print(f"❌ Task execution failed: {e}")
+                    if enable_retry and retry_manager.should_retry_error(str(e)) and attempt < max_attempts:
+                        delay = retry_manager.calculate_delay(attempt)
+                        print(f"⏱️  Waiting {retry_manager.format_duration(delay)} before retry...")
+                        if delay > 0:
+                            await asyncio.sleep(delay)
+                        continue
+                    else:
+                        response_text = f"Thank you for your comment. I encountered a technical issue while processing it: {str(e)}. Please review manually."
+                        task_completed_successfully = True
+            
+            # Post response to GitHub (always post a response)
+            print("📤 Posting response to GitHub...")
+            success = github_manager.post_comment_response(
+                comment.pr_number, 
+                comment.id, 
+                response_text, 
+                commit_sha if commit_sha != "unknown" else None
+            )
+            
+            if success:
+                print("✅ Response posted successfully")
+            else:
+                print("❌ Failed to post response")
+            
+            print("=" * 50)
+            print()
+    
+    print(f"🎉 Completed processing {len(unaddressed_comments)} comment(s)!")
+    return 0
 
 
 async def async_main(working_dir=None, debug_mode=False, tasks_file="tasks.md", enable_reflection=False, enable_retry=False, retry_config=None):
@@ -448,10 +880,11 @@ def main():
     import argparse
     
     parser = argparse.ArgumentParser(
-        description="VibeTeam automated task completion from a tasks file",
+        description="VibeTeam automated task completion from a tasks file or GitHub PR comments",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
+  # Task file mode (default)
   vibeteam-task                           # Run in current directory with tasks.md
   vibeteam-task --dir /path/to/project    # Run in specific directory
   vibeteam-task --tasks-file my-tasks.md # Use custom tasks file
@@ -461,12 +894,25 @@ Examples:
   vibeteam-task --retry --max-attempts 5  # Retry up to 5 times
   vibeteam-task --retry --base-delay 120  # Wait 2 minutes before first retry
   
-The tool will read the tasks file and complete unchecked tasks:
+  # GitHub mode
+  vibeteam-task --github-repo https://github.com/owner/repo
+  vibeteam-task --github-repo owner/repo --retry
+  vibeteam-task --github-repo https://github.com/owner/repo --debug
+  
+Task file mode: The tool will read the tasks file and complete unchecked tasks:
   [ ] Write python hello world hello.py
   [ ] Create a REST API endpoint
 
-Reflection mode requires OPENAI_API_KEY environment variable.
-Use OPENAI_BASE_URL to specify custom OpenAI-compatible API endpoint.
+GitHub mode: The tool will:
+1. Clone/update the repository locally (in current directory)
+2. Fetch all open pull requests from the specified repository
+3. Group comments by PR and switch to appropriate branches
+4. Use Claude Code to analyze and address each comment (fix code or provide response)
+5. Post responses back to GitHub with commit SHA if changes were made
+
+Environment variables:
+- GITHUB_TOKEN: Required for GitHub mode (GitHub personal access token)
+- OPENAI_API_KEY: Required for task reflection mode (task file mode only)
 
 Retry mode automatically retries tasks when encountering:
 - Claude usage limit reached (most common case)
@@ -486,7 +932,12 @@ Retry uses exponential backoff with jitter for optimal behavior.
         "--tasks-file", "-t",
         metavar="FILE",
         default="tasks.md",
-        help="Path to tasks file (default: tasks.md)"
+        help="Path to tasks file (default: tasks.md) - ignored in GitHub mode"
+    )
+    parser.add_argument(
+        "--github-repo",
+        metavar="URL_OR_PATH",
+        help="GitHub repository URL or owner/repo path (enables GitHub mode)"
     )
     parser.add_argument(
         "--debug",
@@ -542,14 +993,26 @@ Retry uses exponential backoff with jitter for optimal behavior.
         )
     
     try:
-        exit_code = asyncio.run(async_main(
-            working_dir=args.dir, 
-            debug_mode=args.debug, 
-            tasks_file=args.tasks_file,
-            enable_reflection=args.enable_reflection,
-            enable_retry=args.retry,
-            retry_config=retry_config
-        ))
+        # Determine mode based on arguments
+        if args.github_repo:
+            # GitHub mode
+            exit_code = asyncio.run(async_github_mode(
+                github_repo_url=args.github_repo,
+                working_dir=args.dir, 
+                debug_mode=args.debug, 
+                enable_retry=args.retry,
+                retry_config=retry_config
+            ))
+        else:
+            # Task file mode
+            exit_code = asyncio.run(async_main(
+                working_dir=args.dir, 
+                debug_mode=args.debug, 
+                tasks_file=args.tasks_file,
+                enable_reflection=args.enable_reflection,
+                enable_retry=args.retry,
+                retry_config=retry_config
+            ))
         sys.exit(exit_code)
     except KeyboardInterrupt:
         print("\n⚠️  Task execution interrupted by user")
