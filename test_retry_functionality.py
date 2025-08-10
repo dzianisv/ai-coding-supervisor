@@ -44,9 +44,13 @@ def test_retry_manager():
     manager = RetryManager(config)
     
     # Test error detection
-    assert manager.should_retry_error("Usage limit reached") == True
-    assert manager.should_retry_error("Rate limit exceeded") == True
-    assert manager.should_retry_error("Normal error message") == False
+    should_retry1, pattern1 = manager.should_retry_error("Usage limit reached")
+    should_retry2, pattern2 = manager.should_retry_error("Rate limit exceeded")
+    should_retry3, pattern3 = manager.should_retry_error("Normal error message")
+    
+    assert should_retry1 == True and pattern1 == "usage limit"
+    assert should_retry2 == True and pattern2 == "rate limit"
+    assert should_retry3 == False and pattern3 == ""
     print("✅ Error detection works")
     
     # Test delay calculation (without jitter for predictable results)
@@ -103,7 +107,7 @@ async def test_retry_integration():
             "Invalid syntax error"  # This should NOT trigger retry
         ]
         
-        retryable_count = sum(1 for error in test_errors if manager.should_retry_error(error))
+        retryable_count = sum(1 for error in test_errors if manager.should_retry_error(error)[0])
         assert retryable_count == 4  # First 4 should be retryable
         print("✅ Error pattern matching works correctly")
         

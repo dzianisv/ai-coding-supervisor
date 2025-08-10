@@ -23,16 +23,51 @@ class RetryConfig(BaseModel):
     jitter: bool = Field(default=True, description="Add random jitter to delays")
     retryable_errors: list[str] = Field(
         default=[
+            # General API limits and quotas
             "usage limit",
             "quota exceeded", 
             "rate limit",
-            "429",
+            "rate_limit_error",
+            "too many requests",
+            "monthly limit exceeded",
+            "daily limit exceeded",
+            
+            # Claude/Anthropic specific errors
+            "credit limit",
+            "anthropic usage",
+            "model overloaded",
+            "request queued",
+            "claude api",
+            
+            # OpenAI specific errors
+            "openai usage",
+            "tokens per minute",
+            "requests per minute",
+            "model currently overloaded",
+            
+            # HTTP status codes
+            "429",  # Too Many Requests
+            "502",  # Bad Gateway
+            "503",  # Service Unavailable  
+            "504",  # Gateway Timeout
+            "524",  # Cloudflare timeout
+            
+            # Network and timeout errors
             "timeout",
+            "read timeout",
+            "connection timeout",
             "temporary failure",
             "service unavailable",
-            "502",
-            "503",
-            "504"
+            "network error",
+            "connection error",
+            "ssl error",
+            
+            # Server errors
+            "internal server error",
+            "server error",
+            "bad gateway",
+            "gateway timeout",
+            "service temporarily unavailable"
         ],
         description="Error patterns that should trigger retries"
     )
@@ -67,19 +102,47 @@ class RetryManager:
     
     def __init__(self, config: RetryConfig):
         self.config = config
+        self.retry_stats = {
+            "total_attempts": 0,
+            "successful_retries": 0,
+            "failed_retries": 0,
+            "error_patterns": {}
+        }
     
-    def should_retry_error(self, error_message: str) -> bool:
-        """Check if an error should trigger a retry based on configured patterns."""
+    def should_retry_error(self, error_message: str) -> tuple[bool, str]:
+        """Check if an error should trigger a retry based on configured patterns.
+        
+        Returns:
+            tuple: (should_retry: bool, matched_pattern: str)
+        """
         error_lower = error_message.lower()
-        return any(pattern.lower() in error_lower for pattern in self.config.retryable_errors)
+        for pattern in self.config.retryable_errors:
+            if pattern.lower() in error_lower:
+                # Track error pattern statistics
+                self.retry_stats["error_patterns"][pattern] = self.retry_stats["error_patterns"].get(pattern, 0) + 1
+                return True, pattern
+        return False, ""
     
-    def calculate_delay(self, attempt: int) -> float:
-        """Calculate delay for the given attempt number with exponential backoff and jitter."""
+    def calculate_delay(self, attempt: int, error_type: str = "") -> float:
+        """Calculate delay for the given attempt number with exponential backoff and jitter.
+        
+        Args:
+            attempt: The attempt number (1-indexed)
+            error_type: The type of error to potentially adjust delay
+        """
         if attempt <= 0:
             return 0.0
         
-        # Exponential backoff: base_delay * exponential_base^(attempt-1)
+        # Base exponential backoff: base_delay * exponential_base^(attempt-1)
         delay = self.config.base_delay * (self.config.exponential_base ** (attempt - 1))
+        
+        # Adjust delay based on error type
+        if "quota" in error_type.lower() or "limit" in error_type.lower():
+            # Longer delays for quota/limit errors
+            delay *= 1.5
+        elif "overloaded" in error_type.lower() or "queued" in error_type.lower():
+            # Shorter delays for overload errors (they resolve faster)
+            delay *= 0.75
         
         # Cap at max_delay
         delay = min(delay, self.config.max_delay)
@@ -101,6 +164,53 @@ class RetryManager:
         else:
             hours = seconds / 3600
             return f"{hours:.1f}h"
+    
+    def log_retry_attempt(self, attempt: int, max_attempts: int, error: str, delay: float, error_pattern: str = ""):
+        """Log retry attempt with detailed information."""
+        self.retry_stats["total_attempts"] += 1
+        
+        print(f"🔄 Retry {attempt}/{max_attempts}: {error_pattern or 'Unknown error'}")
+        print(f"   📝 Error: {error[:100]}{'...' if len(error) > 100 else ''}")
+        print(f"   ⏱️  Waiting {self.format_duration(delay)} before retry...")
+        
+        if error_pattern:
+            print(f"   🏷️  Pattern matched: '{error_pattern}'")
+    
+    def log_retry_success(self):
+        """Log successful retry."""
+        self.retry_stats["successful_retries"] += 1
+        print("✅ Retry successful!")
+    
+    def log_retry_failure(self, final_error: str):
+        """Log final retry failure."""
+        self.retry_stats["failed_retries"] += 1
+        print(f"❌ All retry attempts exhausted. Final error: {final_error[:100]}{'...' if len(final_error) > 100 else ''}")
+    
+    def get_retry_stats(self) -> dict:
+        """Get retry statistics."""
+        stats = self.retry_stats.copy()
+        if stats["total_attempts"] > 0:
+            stats["success_rate"] = (stats["successful_retries"] / stats["total_attempts"]) * 100
+        else:
+            stats["success_rate"] = 0.0
+        return stats
+    
+    def print_retry_summary(self):
+        """Print a summary of retry statistics."""
+        stats = self.get_retry_stats()
+        if stats["total_attempts"] > 0:
+            print("\n📊 Retry Statistics Summary:")
+            print(f"   🔄 Total retry attempts: {stats['total_attempts']}")
+            print(f"   ✅ Successful retries: {stats['successful_retries']}")
+            print(f"   ❌ Failed retries: {stats['failed_retries']}")
+            print(f"   📈 Success rate: {stats['success_rate']:.1f}%")
+            
+            if stats["error_patterns"]:
+                print("   🏷️  Most common error patterns:")
+                sorted_patterns = sorted(stats["error_patterns"].items(), key=lambda x: x[1], reverse=True)
+                for pattern, count in sorted_patterns[:5]:  # Top 5
+                    print(f"      • {pattern}: {count} time(s)")
+            print()
 
 
 class ReflectionModule:
@@ -563,10 +673,10 @@ Focus on being thorough and providing value to the code review process."""
                     if hasattr(execution_result, 'errors') and execution_result.errors:
                         error_messages = ' '.join(execution_result.errors)
                         
-                        if enable_retry and retry_manager.should_retry_error(error_messages) and attempt < max_attempts:
-                            print(f"⚠️  Retryable error detected: {error_messages[:100]}...")
-                            delay = retry_manager.calculate_delay(attempt)
-                            print(f"⏱️  Waiting {retry_manager.format_duration(delay)} before retry...")
+                        should_retry, error_pattern = retry_manager.should_retry_error(error_messages)
+                        if enable_retry and should_retry and attempt < max_attempts:
+                            delay = retry_manager.calculate_delay(attempt, error_pattern)
+                            retry_manager.log_retry_attempt(attempt, max_attempts, error_messages, delay, error_pattern)
                             if delay > 0:
                                 await asyncio.sleep(delay)
                             continue
@@ -575,14 +685,19 @@ Focus on being thorough and providing value to the code review process."""
                     
                     task_completed_successfully = True
                     
+                    # Log successful retry if this was a retry attempt
+                    if attempt > 1 and enable_retry:
+                        retry_manager.log_retry_success()
+                    
                     # Get the latest commit SHA if code changes were made
                     commit_sha = github_manager.get_latest_commit_sha()
                     
                 except Exception as e:
                     print(f"❌ Task execution failed: {e}")
-                    if enable_retry and retry_manager.should_retry_error(str(e)) and attempt < max_attempts:
-                        delay = retry_manager.calculate_delay(attempt)
-                        print(f"⏱️  Waiting {retry_manager.format_duration(delay)} before retry...")
+                    should_retry, error_pattern = retry_manager.should_retry_error(str(e))
+                    if enable_retry and should_retry and attempt < max_attempts:
+                        delay = retry_manager.calculate_delay(attempt, error_pattern)
+                        retry_manager.log_retry_attempt(attempt, max_attempts, str(e), delay, error_pattern)
                         if delay > 0:
                             await asyncio.sleep(delay)
                         continue
@@ -608,6 +723,11 @@ Focus on being thorough and providing value to the code review process."""
             print()
     
     print(f"🎉 Completed processing {len(unaddressed_comments)} comment(s)!")
+    
+    # Display retry statistics if retries were enabled
+    if enable_retry and retry_manager:
+        retry_manager.print_retry_summary()
+    
     return 0
 
 
@@ -728,8 +848,10 @@ Focus on the first unchecked task only. Do not work on multiple tasks simultaneo
             # Show retry status
             if attempt > 1:
                 print(f"🔄 Retry attempt {attempt}/{max_attempts}")
-                if last_error and enable_retry and retry_manager.should_retry_error(str(last_error)):
-                    print(f"   📝 Previous error: {str(last_error)[:100]}...")
+                if last_error and enable_retry:
+                    should_retry, _ = retry_manager.should_retry_error(str(last_error))
+                    if should_retry:
+                        print(f"   📝 Previous error: {str(last_error)[:100]}...")
                 print("-" * 50)
             
             try:
@@ -750,19 +872,18 @@ Focus on the first unchecked task only. Do not work on multiple tasks simultaneo
                     last_error = error_messages
                     
                     # Check if this is a retryable error
-                    if enable_retry and retry_manager.should_retry_error(error_messages):
-                        print(f"⚠️  Detected retryable error: {error_messages[:100]}...")
-                        
+                    should_retry, error_pattern = retry_manager.should_retry_error(error_messages)
+                    if enable_retry and should_retry:
                         if attempt < max_attempts:
                             # Calculate and wait for retry delay
-                            delay = retry_manager.calculate_delay(attempt)
-                            print(f"⏱️  Waiting {retry_manager.format_duration(delay)} before retry...")
+                            delay = retry_manager.calculate_delay(attempt, error_pattern)
+                            retry_manager.log_retry_attempt(attempt, max_attempts, error_messages, delay, error_pattern)
                             
                             if delay > 0:
                                 await asyncio.sleep(delay)
                             continue
                         else:
-                            print(f"❌ Max retry attempts reached. Final error: {error_messages}")
+                            retry_manager.log_retry_failure(error_messages)
                             break
                 
                 # If reflection is enabled, analyze the task completion
@@ -845,22 +966,29 @@ Please address these issues in your implementation."""
                     # No reflection enabled, assume task completed if no obvious errors
                     task_completed_successfully = True
                     
+                    # Log successful retry if this was a retry attempt
+                    if attempt > 1 and enable_retry:
+                        retry_manager.log_retry_success()
+                    
             except Exception as e:
                 last_error = str(e)
                 print(f"❌ Task execution failed: {last_error}")
                 
                 # Check if this is a retryable error
-                if enable_retry and retry_manager.should_retry_error(last_error) and attempt < max_attempts:
-                    print(f"🔄 Retryable error detected, will retry...")
-                    delay = retry_manager.calculate_delay(attempt)
-                    print(f"⏱️  Waiting {retry_manager.format_duration(delay)} before retry...")
+                should_retry, error_pattern = retry_manager.should_retry_error(last_error)
+                if enable_retry and should_retry and attempt < max_attempts:
+                    delay = retry_manager.calculate_delay(attempt, error_pattern)
+                    retry_manager.log_retry_attempt(attempt, max_attempts, last_error, delay, error_pattern)
                     
                     if delay > 0:
                         await asyncio.sleep(delay)
                     continue
                 else:
                     # Non-retryable error or max attempts reached
-                    print(f"💥 Task failed after {attempt} attempt(s)")
+                    if should_retry and attempt >= max_attempts:
+                        retry_manager.log_retry_failure(last_error)
+                    else:
+                        print(f"💥 Task failed after {attempt} attempt(s): Non-retryable error")
                     break
 
         # After the agent runs, we'd expect the tasks file to be modified.
@@ -868,6 +996,10 @@ Please address these issues in your implementation."""
         print("=" * 50)
         print("🔄 Task cycle completed! Checking for remaining tasks...")
         print()
+    
+    # Display retry statistics if retries were enabled
+    if enable_retry and retry_manager:
+        retry_manager.print_retry_summary()
     
     return 0
 
