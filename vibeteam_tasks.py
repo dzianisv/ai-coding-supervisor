@@ -36,8 +36,12 @@ class RetryConfig(BaseModel):
             "credit limit",
             "anthropic usage",
             "model overloaded",
+            "overloaded_error",
             "request queued",
             "claude api",
+            "anthropic.ratelimiterror",
+            "anthropic.apierror",
+            "anthropic.apiconnectionerror",
             
             # OpenAI specific errors
             "openai usage",
@@ -57,10 +61,14 @@ class RetryConfig(BaseModel):
             "read timeout",
             "connection timeout",
             "temporary failure",
-            "service unavailable",
+            "service unavailable", 
+            "service temporarily overloaded",
+            "temporarily overloaded",
             "network error",
             "connection error",
+            "connection reset",
             "ssl error",
+            "httpsconnectionpool",
             
             # Server errors
             "internal server error",
