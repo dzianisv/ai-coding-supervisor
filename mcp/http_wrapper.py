@@ -59,7 +59,7 @@ def health_check():
         sock.settimeout(2)
         sock.connect((MCP_HOST, MCP_PORT))
         sock.close()
-        return jsonify({"status": "healthy", "mcp_server": "connected"})
+        return jsonify({"status": "healthy", "service": "vibeteam-mcp", "mcp_server": "connected"})
     except:
         return jsonify({"status": "unhealthy", "mcp_server": "disconnected"}), 503
 
