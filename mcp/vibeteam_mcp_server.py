@@ -7,6 +7,7 @@ various AI assistants and tools.
 """
 import argparse
 import asyncio
+import json
 import logging
 import os
 import re
@@ -123,36 +124,35 @@ class CloudflareTunnel:
 class VibeTeamMCPServer:
     """VibeTeam MCP Server implementation."""
     
-    def __init__(self, working_directory: Optional[str] = None, tunnel_mode: bool = False, http_port: int = 8080):
+    def __init__(self, working_directory: Optional[str] = None, tunnel_mode: bool = False, http_port: int = 8080, mcp_port: int = 3333):
         """Initialize the VibeTeam MCP server.
         
         Args:
             working_directory: Working directory for agents (defaults to current)
             tunnel_mode: Enable Cloudflare tunnel mode
-            http_port: Port for HTTP server when in tunnel mode
+            http_port: Port for HTTP wrapper when in tunnel mode
+            mcp_port: Port for internal MCP server when in tunnel mode
         """
         self.working_directory = working_directory or os.getcwd()
         self.tunnel_mode = tunnel_mode
         self.http_port = http_port
+        self.mcp_port = mcp_port
         self.tunnel = None
-        self.http_server_process = None
+        
+        # Always use the standard MCP server (proper framework)
+        self.server = StdioMCPServer(name="vibeteam", version="1.0.0")
         
         if tunnel_mode:
-            # In tunnel mode, we need HTTP server + tunnel
-            self.server = None  # Will create HTTP server instead
+            # In tunnel mode, we still create the MCP server but will run it on TCP
+            # and use HTTP wrapper to forward requests
             self.tunnel = CloudflareTunnel(port=http_port)
-        else:
-            # Standard stdio mode
-            self.server = StdioMCPServer(name="vibeteam", version="1.0.0")
         
         self.claude_agent = None
         self.eng_manager = None
         
-        if not tunnel_mode:
-            # Register tools for stdio mode
-            self._register_tools()
-            # Register resources
-            self._register_resources()
+        # Always register tools and resources (used by both modes)
+        self._register_tools()
+        self._register_resources()
         
     def _register_tools(self) -> None:
         """Register all available tools."""
@@ -734,185 +734,27 @@ class VibeTeamMCPServer:
             
         return "\n".join(status)
         
-    def _start_http_server(self) -> None:
-        """Start HTTP server for tunnel mode."""
-        from flask import Flask, request, jsonify
-        import json
+    def _start_http_wrapper(self) -> None:
+        """Start HTTP wrapper that forwards to the MCP server."""
+        from mcp.http_wrapper import app
+        import threading
+        import os
         
-        app = Flask(__name__)
+        # Set environment variables for the HTTP wrapper
+        os.environ['MCP_HOST'] = 'localhost'
+        os.environ['MCP_PORT'] = str(self.mcp_port)
+        os.environ['HTTP_PORT'] = str(self.http_port)
         
-        @app.route('/', methods=['POST'])
-        def handle_mcp_request():
-            """Handle MCP requests over HTTP."""
-            try:
-                data = request.get_json()
-                if not data:
-                    return jsonify({"error": "No JSON data provided"}), 400
-                
-                # Process MCP request directly
-                response = self._process_mcp_request(data)
-                return jsonify(response)
-                
-            except Exception as e:
-                logger.error(f"Error processing HTTP request: {e}")
-                return jsonify({"error": str(e)}), 500
-        
-        @app.route('/health', methods=['GET'])
-        def health_check():
-            """Health check endpoint."""
-            return jsonify({"status": "healthy", "service": "vibeteam-mcp"})
-        
-        # Start server in background thread
-        def run_http_server():
+        # Start HTTP wrapper in background thread
+        def run_http_wrapper():
             app.run(host='0.0.0.0', port=self.http_port, debug=False, threaded=True)
         
-        import threading
-        server_thread = threading.Thread(target=run_http_server)
-        server_thread.daemon = True
-        server_thread.start()
+        wrapper_thread = threading.Thread(target=run_http_wrapper)
+        wrapper_thread.daemon = True
+        wrapper_thread.start()
         
-        logger.info(f"HTTP server started on port {self.http_port}")
+        logger.info(f"HTTP wrapper started on port {self.http_port}, forwarding to MCP server on port {self.mcp_port}")
     
-    def _process_mcp_request(self, data: Dict) -> Dict:
-        """Process MCP request directly without stdio server."""
-        try:
-            method = data.get('method')
-            message_id = data.get('id')
-            params = data.get('params', {})
-            
-            if method == 'initialize':
-                return {
-                    "jsonrpc": "2.0",
-                    "id": message_id,
-                    "result": {
-                        "protocolVersion": "2025-01-21",
-                        "capabilities": {
-                            "tools": {"listChanged": True},
-                            "resources": {"listChanged": True}
-                        },
-                        "serverInfo": {
-                            "name": "vibeteam",
-                            "version": "1.0.0"
-                        }
-                    }
-                }
-            
-            elif method == 'tools/list':
-                tools = [
-                    {
-                        "name": "execute_task",
-                        "description": "Execute a coding task using Claude Code Agent",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "description": {"type": "string", "description": "Task description"}
-                            },
-                            "required": ["description"]
-                        }
-                    },
-                    {
-                        "name": "review_code", 
-                        "description": "Review code for quality and improvements",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "code": {"type": "string", "description": "Code to review"},
-                                "language": {"type": "string", "description": "Programming language"}
-                            },
-                            "required": ["code"]
-                        }
-                    }
-                ]
-                
-                return {
-                    "jsonrpc": "2.0",
-                    "id": message_id,
-                    "result": {"tools": tools}
-                }
-            
-            elif method == 'tools/call':
-                tool_name = params.get('name')
-                arguments = params.get('arguments', {})
-                
-                # Execute tool
-                if tool_name == 'execute_task':
-                    result = self._execute_task_sync(arguments.get('description', ''))
-                elif tool_name == 'review_code':
-                    result = self._review_code_sync(arguments.get('code', ''), arguments.get('language', 'python'))
-                else:
-                    raise ValueError(f"Unknown tool: {tool_name}")
-                
-                return {
-                    "jsonrpc": "2.0",
-                    "id": message_id,
-                    "result": {
-                        "status": "completed",
-                        "output": result
-                    }
-                }
-            
-            else:
-                raise ValueError(f"Unknown method: {method}")
-                
-        except Exception as e:
-            return {
-                "jsonrpc": "2.0",
-                "id": data.get('id'),
-                "error": {
-                    "code": -32603,
-                    "message": str(e)
-                }
-            }
-    
-    def _execute_task_sync(self, description: str) -> str:
-        """Execute task synchronously for HTTP mode."""
-        # Initialize agent if needed
-        if not self.claude_agent:
-            self.claude_agent = ClaudeCodeAgent(
-                working_directory=self.working_directory,
-                permission_mode="bypassPermissions"
-            )
-        
-        # Run async task in sync context
-        import asyncio
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        
-        try:
-            result = loop.run_until_complete(
-                self.claude_agent.execute_task({"description": description})
-            )
-            return str(result)
-        except Exception as e:
-            return f"Task execution failed: {str(e)}"
-    
-    def _review_code_sync(self, code: str, language: str) -> str:
-        """Review code synchronously for HTTP mode.""" 
-        # Initialize agent if needed
-        if not self.claude_agent:
-            self.claude_agent = ClaudeCodeAgent(
-                working_directory=self.working_directory,
-                permission_mode="bypassPermissions"
-            )
-        
-        # Run async task in sync context
-        import asyncio
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        
-        try:
-            result = loop.run_until_complete(
-                self.claude_agent.review_work({"code": code, "language": language})
-            )
-            return str(result)
-        except Exception as e:
-            return f"Code review failed: {str(e)}"
 
     async def run(self) -> None:
         """Run the MCP server."""
@@ -930,29 +772,42 @@ class VibeTeamMCPServer:
                 await self.server.stop()
     
     async def run_tunnel_mode(self) -> None:
-        """Run server in tunnel mode with HTTP server and Cloudflare tunnel."""
+        """Run server in tunnel mode with proper MCP framework + HTTP wrapper + Cloudflare tunnel."""
         try:
-            # Start HTTP server
             logger.info("🚀 Starting VibeTeam MCP server in tunnel mode...")
-            self._start_http_server()
             
-            # Wait for HTTP server to be ready
+            # Start the HTTP wrapper that forwards to our MCP server
+            self._start_http_wrapper()
+            
+            # Wait for HTTP wrapper to be ready
             import time
             time.sleep(2)
             
-            # Start Cloudflare tunnel
+            # Start Cloudflare tunnel pointing to HTTP wrapper
             tunnel_url = self.tunnel.start()
             if tunnel_url:
                 logger.info(f"🌍 VibeTeam MCP server is publicly accessible at: {tunnel_url}")
                 logger.info("📋 Use this URL in your MCP client configuration")
             else:
                 logger.warning("⚠️ Cloudflare tunnel failed to start, server only available locally")
-                logger.info(f"🏠 Local server running at: http://localhost:{self.http_port}")
+                logger.info(f"🏠 Local HTTP wrapper running at: http://localhost:{self.http_port}")
+            
+            # Start the actual MCP server on TCP port (for HTTP wrapper to connect to)
+            logger.info(f"🔧 Starting internal MCP server on TCP port {self.mcp_port}")
+            
+            # Create TCP server for the MCP protocol
+            tcp_server = await asyncio.start_server(
+                self._handle_tcp_client, 
+                'localhost', 
+                self.mcp_port
+            )
+            
+            logger.info(f"📡 MCP server listening on TCP port {self.mcp_port}")
             
             # Keep server running
             try:
-                while True:
-                    await asyncio.sleep(1)
+                async with tcp_server:
+                    await tcp_server.serve_forever()
             except KeyboardInterrupt:
                 logger.info("Server interrupted by user")
                 
@@ -962,6 +817,39 @@ class VibeTeamMCPServer:
         finally:
             if self.tunnel:
                 self.tunnel.stop()
+                
+    async def _handle_tcp_client(self, reader, writer):
+        """Handle TCP client connection for MCP protocol."""
+        try:
+            while True:
+                # Read JSON-RPC message
+                line = await reader.readline()
+                if not line:
+                    break
+                    
+                try:
+                    message = json.loads(line.decode('utf-8').strip())
+                    
+                    # Use the standard MCP server to handle the message
+                    response = await self.server._handle_message(message)
+                    
+                    if response:
+                        response_str = json.dumps(response) + '\n'
+                        writer.write(response_str.encode('utf-8'))
+                        await writer.drain()
+                        
+                except json.JSONDecodeError as e:
+                    logger.error(f"Invalid JSON from client: {e}")
+                    break
+                except Exception as e:
+                    logger.error(f"Error handling client message: {e}")
+                    break
+                    
+        except Exception as e:
+            logger.error(f"TCP client error: {e}")
+        finally:
+            writer.close()
+            await writer.wait_closed()
             
     def run_sync(self) -> None:
         """Run the MCP server in synchronous mode (better for subprocesses)."""

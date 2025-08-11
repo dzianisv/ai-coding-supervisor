@@ -14,6 +14,16 @@ from datetime import datetime
 import subprocess
 
 
+#  - ✅ anthropic.RateLimitError: 429 rate_limit_error
+#  - ✅ anthropic.APIError: 529 overloaded_error
+#  - ✅ anthropic.APIConnectionError: Connection timeout
+#  - ✅ Usage limit exceeded for this month
+#  - ✅ Credit limit reached for your account
+#  - ✅ Service temporarily overloaded
+#  - ✅ Network errors (connection reset, SSL, timeouts)
+
+
+
 class RetryConfig(BaseModel):
     """Configuration for retry behavior."""
     max_attempts: int = Field(default=3, description="Maximum number of retry attempts")
