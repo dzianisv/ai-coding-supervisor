@@ -52,7 +52,7 @@ class TestHelloWorldGeneration:
         task_descriptions = [
             "Create a simple Python hello world program",
             "Generate a Python hello world script that prints 'Hello, world!'",
-            "Write a basic Python program that outputs Hello, world!"
+            "Write a basic Python hello world program that outputs Hello, world!"
         ]
         
         for description in task_descriptions:
