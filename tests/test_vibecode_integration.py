@@ -36,7 +36,7 @@ class VibeCodeMCPTester:
         env["MCP_MODE"] = "tcp"
         
         self.server_process = subprocess.Popen(
-            [sys.executable, "-m", "run_mcp_server"],
+            [sys.executable, "-m", "mcp.vibeteam_mcp_server", "--no-tunnel"],
             env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,

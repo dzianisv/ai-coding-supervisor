@@ -72,7 +72,11 @@ pip install git+https://github.com/VibeTechnologies/VibeTeam.git
 
 4. **Run the MCP server** (for ChatGPT/Claude integration):
    ```bash
+   # Default: Tunnel mode for public access
    vibeteam-mcp
+   
+   # Standard mode (stdio protocol) 
+   vibeteam-mcp --no-tunnel
    ```
 
 ### Available Commands
@@ -102,7 +106,9 @@ vibeteam-task --retry --enable-reflection
 vibeteam-task --dir /path/to/project --tasks-file my-tasks.md
 
 # MCP server
-vibeteam-mcp                    # Standard MCP protocol (stdio)
+vibeteam-mcp                    # Default: Cloudflare tunnel for public access
+vibeteam-mcp --no-tunnel        # Standard MCP protocol (stdio)
+vibeteam-mcp --port 9000        # Custom port with tunnel
 ```
 
 ## 🤖 VibeCode Tasks - Automated Task Completion
@@ -163,14 +169,14 @@ VibeTeam includes a full MCP server implementation that exposes AI coding capabi
 
 ### Deployment Options
 
-1. **Local Development**:
+1. **Public Access via Cloudflare** (Default):
    ```bash
-   vibeteam-mcp  # Standard MCP protocol
+   vibeteam-mcp  # Default: Automatically starts tunnel
    ```
 
-2. **Public Access via Cloudflare**:
+2. **Local Development**:
    ```bash
-   ./deploy/cloudflare/setup_tunnel.sh
+   vibeteam-mcp --no-tunnel  # Standard MCP protocol (stdio)
    ```
 
 3. **Docker Deployment**:
@@ -179,7 +185,26 @@ VibeTeam includes a full MCP server implementation that exposes AI coding capabi
    docker run -p 8080:8080 vibeteam
    ```
 
-See [DEPLOYMENT.md](./DEPLOYMENT.md) for detailed deployment instructions.
+#### Cloudflare Tunnel Integration (Default)
+
+By default, `vibeteam-mcp` automatically:
+- Starts an HTTP server on the specified port (default: 8080)
+- Launches a Cloudflare tunnel for public access
+- Provides a public URL that can be used with any MCP client
+- Eliminates the need for manual tunnel setup scripts
+
+**Requirements**: Install `cloudflared` from [Cloudflare](https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/installation/)
+
+**Example**:
+```bash
+vibeteam-mcp --port 9000
+# Output: 🌍 VibeTeam MCP server is publicly accessible at: https://example-123.trycloudflare.com
+
+# To disable tunnel mode:
+vibeteam-mcp --no-tunnel
+```
+
+The integrated tunnel approach eliminates the need for manual deployment scripts. For advanced deployment scenarios, see [DEPLOYMENT.md](./DEPLOYMENT.md).
 
 ## 🛠 Usage
 
