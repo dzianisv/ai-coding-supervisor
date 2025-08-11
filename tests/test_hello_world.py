@@ -16,6 +16,7 @@ class TestHelloWorldGeneration:
     """Test class for VibeTeam hello world generation functionality"""
     
     @pytest.mark.unit
+    @pytest.mark.asyncio
     async def test_claude_agent_can_create_hello_world(self):
         """Test that Claude Code Agent can create a hello world program"""
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -50,7 +51,7 @@ class TestHelloWorldGeneration:
         """Test that hello world task descriptions are properly formatted"""
         task_descriptions = [
             "Create a simple Python hello world program",
-            "Generate a hello world script that prints 'Hello, world!'",
+            "Generate a Python hello world script that prints 'Hello, world!'",
             "Write a basic Python program that outputs Hello, world!"
         ]
         
